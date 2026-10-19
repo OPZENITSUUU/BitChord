@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.R
 import com.music.bitchord.data.NerdStats
+import com.music.bitchord.data.TelemetryProvenance
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.playback.AudioOutputStatus
 import com.music.bitchord.playback.dsd.DsdFilter
@@ -236,34 +237,49 @@ fun AudioPipelineDialog(
                 .onGloballyPositioned { columnCoordinates = it },
         ) {
             // 1. Track Info Stage
-            val sourceName = nerdStats?.sourceName ?: "—"
+            val inputStats = nerdStats
+            val sourceName = inputStats?.sourceName ?: stringResource(R.string.pipeline_unknown_source)
             // DSD is the one source whose own rate is not the rate the
             // rest of the pipeline runs at: DsdExtractor hands the
             // renderer 176.4 kHz PCM, so every stage after this one has
             // to be told that rate instead of the DSD bit rate.
-            val dsdRateHz = nerdStats?.takeIf { it.mimeType?.startsWith("audio/dsd") == true }?.sampleRateHz
-            val pcmRateHz = if (dsdRateHz != null) DsdFormat.PCM_RATE else nerdStats?.sampleRateHz
-            val codec = NerdStats.codecLabel(nerdStats?.mimeType) ?: nerdStats?.mimeType ?: "—"
+            val dsdRateHz = inputStats?.takeIf { it.mimeType?.startsWith("audio/dsd") == true }?.sampleRateHz
+            val pcmRateHz = if (dsdRateHz != null) DsdFormat.PCM_RATE else inputStats?.sampleRateHz
+            val codec = NerdStats.codecLabel(inputStats?.mimeType)
+                ?: inputStats?.mimeType
+                ?: stringResource(R.string.pipeline_unknown_format)
             val format = nerdStats?.container?.let { "$codec ($it)" } ?: codec
-            // A lossy codec has no bit depth of its own; the decoder's PCM
-            // depth is not the source's, so it is only shown for lossless.
-            val bitDepth = if (nerdStats?.isLossless == true) {
-                nerdStats?.bitDepth?.let { "$it-bit" }
-                    ?: nerdStats?.claimed?.bitDepth?.let { "$it-bit" }
-                    ?: "—"
-            } else {
-                "—"
+            // Source claims are shown separately below and never fill a missing
+            // Media3 measurement in these runtime rows.
+            val bitDepth = when {
+                inputStats?.mimeType == null -> stringResource(R.string.pipeline_unknown_bit_depth)
+                inputStats.isLossless -> inputStats.bitDepth?.let { "$it-bit" }
+                    ?: stringResource(R.string.pipeline_unknown_bit_depth)
+                else -> stringResource(R.string.pipeline_not_applicable_bit_depth)
             }
-            val sampleRate = nerdStats?.sampleRateHz?.let(::rateText)
-                ?: nerdStats?.claimed?.sampleRateHz?.let(::rateText)
-                ?: "—"
-            val bitrate = nerdStats?.bitrateKbps?.let { "$it kbps" } ?: "—"
-            val pcmDataRate = nerdStats?.pcmDataRateKbps?.let { "$it kbps" } ?: "—"
-            val channels = when (nerdStats?.channels) {
+            val sampleRate = inputStats?.sampleRateHz?.let(::rateText)
+                ?: stringResource(R.string.pipeline_unknown_sample_rate)
+            val bitrate = inputStats?.bitrateKbps?.let { value ->
+                val provenance = when (inputStats.bitrateProvenance) {
+                    TelemetryProvenance.AUTHORITATIVE -> stringResource(R.string.pipeline_provenance_reported)
+                    TelemetryProvenance.MEASURED -> stringResource(R.string.pipeline_provenance_measured)
+                    TelemetryProvenance.SOURCE_REPORTED -> stringResource(R.string.pipeline_provenance_source)
+                    TelemetryProvenance.DERIVED -> stringResource(R.string.pipeline_provenance_derived)
+                    TelemetryProvenance.UNKNOWN -> stringResource(R.string.pipeline_provenance_unknown)
+                }
+                "$value kbps · $provenance"
+            } ?: stringResource(R.string.pipeline_unknown_bitrate)
+            val pcmDataRate = inputStats?.pcmDataRateKbps?.let { "$it kbps" }
+                ?: if (inputStats?.isLossless == true) {
+                    stringResource(R.string.pipeline_unknown_pcm_data_rate)
+                } else {
+                    stringResource(R.string.pipeline_not_applicable_pcm_rate)
+                }
+            val channels = when (inputStats?.channels) {
                 1 -> stringResource(R.string.mono)
                 2 -> stringResource(R.string.stereo)
-                null -> "—"
-                else -> "${nerdStats?.channels} (Surround)"
+                null -> stringResource(R.string.pipeline_unknown_channels)
+                else -> "${inputStats.channels} (Surround)"
             }
 
             PipelineRule()
@@ -277,6 +293,9 @@ fun AudioPipelineDialog(
             ) {
                 PipelineRow(stringResource(R.string.pipeline_source), sourceName)
                 PipelineRow(stringResource(R.string.pipeline_format), format)
+                inputStats?.claimed?.let {
+                    PipelineRow(stringResource(R.string.pipeline_source_claim), it.summary)
+                }
                 PipelineRow(stringResource(R.string.pipeline_bit_depth), bitDepth)
                 PipelineRow(stringResource(R.string.pipeline_sample_rate), sampleRate)
                 PipelineRow(stringResource(R.string.pipeline_bitrate), bitrate)

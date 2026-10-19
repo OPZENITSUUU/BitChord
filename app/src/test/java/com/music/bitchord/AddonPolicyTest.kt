@@ -65,34 +65,39 @@ class AddonPolicyTest {
     }
 
     @Test
-    fun `bluetooth qualifies only on ldac lhdc or aptx lossless`() {
+    fun `bluetooth qualifies only on explicit aptx lossless in cd format`() {
         val a2dp = setOf(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
-        for (codec in listOf("LDAC", "LHDC V5", "LHDC V3", "aptX Lossless")) {
-            val state = LosslessOutput.decide(a2dp, codec)
-            assertTrue(codec, state.capable)
-            assertEquals(LosslessOutput.Kind.BLUETOOTH, state.via)
+        val exact = LosslessOutput.decide(a2dp, "aptX Lossless", 44_100, 16)
+        assertTrue(exact.capable)
+        assertEquals(LosslessOutput.Kind.BLUETOOTH, exact.via)
+
+        // Codec family / Hi-Res labels are not proof of bit-exact transport.
+        for (codec in listOf("LDAC", "LHDC V5", "LHDC V3", "SSC UHQ", "Samsung UHQ")) {
+            val state = LosslessOutput.decide(a2dp, codec, 96_000, 24)
+            assertFalse(codec, state.capable)
+            assertEquals(codec, state.bluetoothCodec)
+        }
+        for ((rate, depth) in listOf(null to 16, 44_100 to null, 48_000 to 16, 44_100 to 24)) {
+            val state = LosslessOutput.decide(a2dp, "aptX Lossless", rate, depth)
+            assertFalse("aptX Lossless $rate/$depth", state.capable)
+            assertEquals("aptX Lossless", state.bluetoothCodec)
         }
         for (codec in listOf("SBC", "AAC", "aptX", "aptX HD", "aptX Adaptive", "LC3", "Opus")) {
-            val state = LosslessOutput.decide(a2dp, codec)
+            val state = LosslessOutput.decide(a2dp, codec, 44_100, 16)
             assertFalse(codec, state.capable)
             assertEquals(codec, state.bluetoothCodec)
         }
     }
 
     @Test
-    fun `samsung qualifies only in uhq`() {
+    fun `samsung high resolution mode does not qualify as verified lossless`() {
         val a2dp = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
         for (codec in listOf("SSC UHQ", "Samsung UHQ")) {
-            assertTrue(codec, LosslessOutput.decide(a2dp, codec, 48_000).capable)
+            assertFalse(codec, LosslessOutput.decide(a2dp, codec, 96_000, 24).capable)
         }
-        // Named for the family only: the rate is what tells UHQ apart.
         for (codec in listOf("SSC", "Samsung Seamless Codec", "Samsung Scalable")) {
-            assertTrue(codec, LosslessOutput.decide(a2dp, codec, 96_000).capable)
-            assertFalse(codec, LosslessOutput.decide(a2dp, codec, 48_000).capable)
-            assertFalse(codec, LosslessOutput.decide(a2dp, codec, null).capable)
+            assertFalse(codec, LosslessOutput.decide(a2dp, codec, 96_000, 24).capable)
         }
-        // A high rate alone proves nothing for anyone else's lossy codec.
-        assertFalse(LosslessOutput.decide(a2dp, "aptX Adaptive", 96_000).capable)
     }
 
     @Test

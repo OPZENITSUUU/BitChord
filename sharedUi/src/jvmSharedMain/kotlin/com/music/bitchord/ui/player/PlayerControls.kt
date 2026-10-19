@@ -64,6 +64,8 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -73,6 +75,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -555,11 +558,13 @@ internal fun VolumeRow(
 internal fun PlayerActionRow(
     lyricsOpen: Boolean,
     queueOpen: Boolean,
+    playbackSpeed: Float,
     shuffleEnabled: Boolean,
     repeatMode: Int,
     autoplayEnabled: Boolean,
     onToggleLyrics: () -> Unit,
     onToggleQueue: () -> Unit,
+    onPlaybackSpeedChange: (Float) -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onToggleAutoplay: () -> Unit,
@@ -676,6 +681,8 @@ internal fun PlayerActionRow(
                     }
                 } else {
                     OutputPartyPill(
+                        playbackSpeed = playbackSpeed,
+                        onPlaybackSpeedChange = onPlaybackSpeedChange,
                         onOutput = onOpenOutput,
                         onParty = onListenTogether,
                         onOpenMembers = onOpenListenTogetherMembers,
@@ -889,43 +896,78 @@ private fun PillDivider() {
  */
 @Composable
 private fun OutputPartyPill(
+    playbackSpeed: Float,
+    onPlaybackSpeedChange: (Float) -> Unit,
     onOutput: () -> Unit,
     onParty: () -> Unit,
     /** Who's in it, before the settings page — see [ListenTogetherMembersSheet]. */
     onOpenMembers: () -> Unit,
 ) {
     val badge = rememberPartyBadge()
-    Pill {
-        PillSegment(
-            icon = Icons.Rounded.Headphones,
-            iconSize = PILL_HEADPHONES_SIZE,
-            contentDescription = stringResource(Res.string.audio_output),
-            onClick = onOutput,
-        )
-        PillDivider()
-        PillSegment(
-            // Person rather than Groups: the three-person glyph is drawn half
-            // the height of Headphones and wider than the segment holding it,
-            // so the two halves of the capsule never looked like a pair.
-            icon = Icons.Rounded.Person,
-            iconSize = PILL_PARTY_SIZE,
-            // The count is here and nowhere else: spoken, it is the whole
-            // point of the control; drawn, it would cost the capsule its
-            // symmetry for something the caption below already implies.
-            contentDescription = if (badge.inParty) {
-                stringResource(Res.string.listen_together_open_count, badge.members)
-            } else {
-                stringResource(Res.string.listen_together_open)
-            },
-            // Already in a party, this opens who's in it rather than the
-            // settings page directly; there is nothing to create or join once
-            // there is a party, so [onParty] only ever fires beforehand.
-            onClick = if (badge.inParty) onOpenMembers else onParty,
-            highlighted = badge.inParty,
-            trailingLabel = badge.members.takeIf { badge.inParty }?.toString(),
-        )
+    var speedMenuOpen by remember { mutableStateOf(false) }
+    Box {
+        Pill {
+            PillSegment(
+                contentDescription = "Playback speed",
+                label = playbackSpeedLabel(playbackSpeed),
+                onClick = { speedMenuOpen = true },
+                highlighted = playbackSpeed != 1f,
+            )
+            PillDivider()
+            PillSegment(
+                icon = Icons.Rounded.Headphones,
+                iconSize = PILL_HEADPHONES_SIZE,
+                contentDescription = stringResource(Res.string.audio_output),
+                onClick = onOutput,
+            )
+            PillDivider()
+            PillSegment(
+                // Person rather than Groups: the three-person glyph is drawn half
+                // the height of Headphones and wider than the segment holding it,
+                // so the two halves of the capsule never looked like a pair.
+                icon = Icons.Rounded.Person,
+                iconSize = PILL_PARTY_SIZE,
+                // The count is here and nowhere else: spoken, it is the whole
+                // point of the control; drawn, it would cost the capsule its
+                // symmetry for something the caption below already implies.
+                contentDescription = if (badge.inParty) {
+                    stringResource(Res.string.listen_together_open_count, badge.members)
+                } else {
+                    stringResource(Res.string.listen_together_open)
+                },
+                // Already in a party, this opens who's in it rather than the
+                // settings page directly; there is nothing to create or join once
+                // there is a party, so [onParty] only ever fires beforehand.
+                onClick = if (badge.inParty) onOpenMembers else onParty,
+                highlighted = badge.inParty,
+                trailingLabel = badge.members.takeIf { badge.inParty }?.toString(),
+            )
+        }
+        DropdownMenu(
+            expanded = speedMenuOpen,
+            onDismissRequest = { speedMenuOpen = false },
+        ) {
+            PLAYBACK_SPEED_PRESETS.forEach { speed ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = playbackSpeedLabel(speed) + if (speed == playbackSpeed) "  ✓" else "",
+                        )
+                    },
+                    onClick = {
+                        onPlaybackSpeedChange(speed)
+                        speedMenuOpen = false
+                    },
+                )
+            }
+        }
     }
 }
+
+internal val PLAYBACK_SPEED_PRESETS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
+
+internal fun playbackSpeedLabel(speed: Float): String =
+    "${if (speed % 1f == 0f) speed.toInt() else speed}×"
 
 /**
  * One control inside a [Pill] — [BottomGlyph]'s twin, squared off.

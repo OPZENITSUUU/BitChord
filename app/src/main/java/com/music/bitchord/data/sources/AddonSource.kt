@@ -306,10 +306,12 @@ class AddonSource(
     /**
      * Everything between a URL the addon named and one the player may open.
      *
-     * Three refusals, each of which is the only place it can be caught:
+     * Four refusals, each of which is the only place it can be caught:
      *
      *  - **Unopenable.** [ModuleSource.malformed] is OkHttp's own parser plus
      *    the doubled-origin test, asked here where refusing costs nothing.
+     *  - **Cleartext.** Remote addon streams must use HTTPS; loopback HTTP is
+     *    permitted only in debug builds for local tests.
      *  - **Encrypted.** The spec forbids an addon sending a protected rendition
      *    unless the request asked for one, and this app never does. Handing the
      *    player bytes it has no key for fails later and less clearly.
@@ -324,6 +326,10 @@ class AddonSource(
                 TAG,
                 "${config.displayName}: malformed URL for $trackId; skipping it — ${url.take(120)}",
             )
+            return null
+        }
+        if (!AddonClient.isSecureUrl(url)) {
+            TrackLog.w(TAG, "${config.displayName}: refusing a non-HTTPS stream URL for $trackId")
             return null
         }
         if (answer.isEncrypted) {
@@ -364,14 +370,15 @@ class AddonSource(
     }
 
     /**
-     * What is really on the end of the URL, from what the addon said about it.
+     * The addon's advertised format, kept separate from the decoder's measured
+     * format in [com.music.bitchord.data.NerdStats].
      *
-     * Ordered by how much each claim is worth. A stated `codec` is the addon
-     * answering the question directly and is taken as given. A container names
-     * the envelope, which for `flac`, `wav` and `mp3` settles the codec too. A
-     * mime type is next, then a quality label naming a lossless tier, and last
-     * the URL's own extension — a guess, but the one that catches a server that
-     * has quietly walked down its fallback chain and handed back `.128.mp3`.
+     * A stated codec/container/MIME and finally a URL extension can guide source
+     * selection, but a quality label such as "LOSSLESS" or "Hi-Res FLAC" is not
+     * codec evidence. In particular, never turn a requested tier into an
+     * assumed FLAC codec: the stream may have fallen back to AAC/Opus while the
+     * addon kept the requested label. A selected stream is only described as
+     * lossless in the player after Media3 reports the actual decoder format.
      *
      * Null when none of them knows, which is left null rather than guessed at:
      * [StreamFormat.isLossless] answering "unknown" is information, and
@@ -384,8 +391,6 @@ class AddonSource(
                 ?.lowercase(Locale.ROOT)?.takeIf { it in AUDIO_CODECS }
             ?: if (answer.isDolbyAtmos) {
                 "eac3-joc"
-            } else if (ModuleSource.qualityTier(answer.qualityText) == ModuleSource.LOSSLESS) {
-                "flac"
             } else {
                 url.substringBefore('?').substringAfterLast('.')
                     .lowercase(Locale.ROOT).takeIf { it in AUDIO_CODECS }

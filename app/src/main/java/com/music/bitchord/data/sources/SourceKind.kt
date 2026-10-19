@@ -5,8 +5,8 @@ package com.music.bitchord.data.sources
  *
  * Fixed and small on purpose. **[rank] is the order sources are tried** — see
  * `SourceRegistry.active()`, which sorts on it — so the sources a user added
- * come first, then the legacy built-in module kind, then JioSaavn, then
- * YouTube Music. Adding a source means adding a [MusicSource]
+ * come first, then the legacy built-in module kind and optional Commons/JioSaavn
+ * catalogs, then YouTube Music. Adding a source means adding a [MusicSource]
  * implementation and an entry here, which is the point — every protocol the
  * app speaks is one someone can read in this repo, and a source can't teach
  * the app a new way to behave after it ships.
@@ -127,6 +127,16 @@ enum class SourceKind(
         rank = 1,
     ),
 
+    /** Freely licensed FLAC recordings from Wikimedia Commons; only Public Domain and CC0 files are surfaced. */
+    WIKIMEDIA_COMMONS(
+        label = "Commons FLAC",
+        detail = "Wikimedia Commons recordings whose file metadata states Public Domain or CC0; FLAC only.",
+        labels = listOf("Public Domain", "FLAC", "Lossless"),
+        needsServer = false,
+        canServeLossless = true,
+        rank = 2,
+    ),
+
     JIOSAAVN(
         label = "JioSaavn",
         detail = "Optional JioSaavn streams up to 320kbps AAC/MP4. Catalogue matching can select the wrong song.",
@@ -134,12 +144,12 @@ enum class SourceKind(
         needsServer = false,
         canServeLossless = false,
         worthPrefetching = true,
-        rank = 2,
+        rank = 3,
     ),
 
     /**
      * The source the app was built on, listed here so it always has a fixed
-     * place: second, behind the module source. It cannot be removed — see
+     * place after the optional catalogs. It cannot be removed — see
      * [SourceRegistry]. Nothing else in the app can supply a home feed, a
      * radio station or a related-tracks queue.
      */
@@ -150,7 +160,7 @@ enum class SourceKind(
         labels = listOf("Lossy", "Full catalogue", "Radio"),
         needsServer = false,
         canServeLossless = false,
-        rank = 3,
+        rank = 4,
     ),
     ;
 

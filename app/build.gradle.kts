@@ -55,6 +55,7 @@ val listenTogetherServer: String = (
 
 // See the root build.gradle.kts: one version for the phone and its watch app.
 val betaSuffix = rootProject.extra["bitchordBetaSuffix"] as String
+val personalAppName = providers.gradleProperty("bitchordAppName").orElse("BitChord Personal").get()
 
 android {
     namespace = "com.music.bitchord"
@@ -121,6 +122,12 @@ android {
         create("prod") {
             dimension = "env"
             // Matches defaultConfig — this is the package already shipped/installed.
+        }
+        create("personal") {
+            dimension = "env"
+            // Same package identity as prod; the flavor only changes the personal brand/resources.
+            applicationId = "com.music.bitchord"
+            resValue("string", "app_name", personalAppName)
         }
     }
 

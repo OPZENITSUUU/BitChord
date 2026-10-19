@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +39,7 @@ import com.halilibo.richtext.ui.material3.RichText
 import com.music.bitchord.R
 import com.music.bitchord.data.AppUpdateChecker
 import com.music.bitchord.data.settings.AppSettings
+import java.util.Locale
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
@@ -58,6 +60,18 @@ private val DOWNLOAD_ROW_HEIGHT = 4.dp
 
 /** How much of the card's height the release notes are allowed to fill before scrolling. */
 private val NOTES_MAX_HEIGHT = 220.dp
+
+private fun formatByteSize(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val units = listOf("KiB", "MiB", "GiB", "TiB")
+    var value = bytes.toDouble()
+    var unit = -1
+    do {
+        value /= 1024.0
+        unit++
+    } while (value >= 1024.0 && unit < units.lastIndex)
+    return String.format(Locale.ROOT, "%.1f %s", value, units[unit])
+}
 
 /**
  * Once-per-launch nudge that a newer build is on GitHub Releases — the top
@@ -83,6 +97,7 @@ private val NOTES_MAX_HEIGHT = 220.dp
 fun UpdateAvailableDialog(
     version: String,
     notes: String?,
+    canDownload: Boolean,
     hazeState: HazeState,
     onDismiss: () -> Unit,
     onDownload: () -> Unit,
@@ -147,8 +162,7 @@ fun UpdateAvailableDialog(
                     color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center,
                 )
-                Text(
-                    text = when (state) {
+                val baseMessage = when (state) {
                         is AppUpdateChecker.DownloadState.Downloading ->
                             stringResource(R.string.update_downloading_body, version)
                         is AppUpdateChecker.DownloadState.Ready ->
@@ -157,7 +171,19 @@ fun UpdateAvailableDialog(
                             stringResource(R.string.update_failed_body, version)
                         else ->
                             stringResource(R.string.update_available_body, version)
-                    },
+                    }
+                val downloadProgress = (state as? AppUpdateChecker.DownloadState.Downloading)?.let { progress ->
+                    val downloaded = formatByteSize(progress.downloadedBytes)
+                    val total = progress.totalBytes
+                    if (total == null) {
+                        "$downloaded downloaded · total unknown"
+                    } else {
+                        val percent = progress.fraction?.let { (it * 100f).toInt() }
+                        "$downloaded / ${formatByteSize(total)}${percent?.let { " · $it%" }.orEmpty()}"
+                    }
+                }
+                Text(
+                    text = downloadProgress?.let { "$baseMessage · $it" } ?: baseMessage,
                     modifier = Modifier.padding(top = 4.dp),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 13.sp,
@@ -171,6 +197,7 @@ fun UpdateAvailableDialog(
                 // hairline track — same weight as [AlertRule], so it reads as
                 // part of the card rather than a widget bolted onto it.
                 val downloading = state as? AppUpdateChecker.DownloadState.Downloading
+                val downloadFraction = downloading?.fraction
                 if (downloading != null || state is AppUpdateChecker.DownloadState.Failed) {
                     Box(
                         Modifier
@@ -180,10 +207,16 @@ fun UpdateAvailableDialog(
                             .clip(RoundedCornerShape(DOWNLOAD_ROW_HEIGHT / 2))
                             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)),
                     ) {
-                        if (downloading != null && downloading.fraction > 0f) {
+                        if (downloading != null && downloadFraction == null) {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxSize(),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = Color.Transparent,
+                            )
+                        } else if (downloadFraction != null && downloadFraction > 0f) {
                             Box(
                                 Modifier
-                                    .fillMaxWidth(downloading.fraction)
+                                    .fillMaxWidth(downloadFraction)
                                     .height(DOWNLOAD_ROW_HEIGHT)
                                     .clip(RoundedCornerShape(DOWNLOAD_ROW_HEIGHT / 2))
                                     .background(MaterialTheme.colorScheme.primary),
@@ -255,7 +288,11 @@ fun UpdateAvailableDialog(
                     AlertAction(label = stringResource(R.string.open_releases_page), emphasised = false, onClick = onOpenReleasePage)
                 }
                 else -> {
-                    AlertAction(label = stringResource(R.string.download_now), emphasised = true, onClick = onDownload)
+                    AlertAction(
+                        label = stringResource(if (canDownload) R.string.download_now else R.string.open_releases_page),
+                        emphasised = true,
+                        onClick = if (canDownload) onDownload else onOpenReleasePage,
+                    )
                     AlertRule()
                     AlertAction(label = stringResource(R.string.remind_me_later), emphasised = false, onClick = onDismiss)
                 }

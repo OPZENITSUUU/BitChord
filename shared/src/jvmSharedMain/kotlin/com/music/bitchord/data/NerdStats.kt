@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 enum class TelemetryProvenance {
     AUTHORITATIVE,
     MEASURED,
+    SOURCE_REPORTED,
     DERIVED,
     UNKNOWN,
 }

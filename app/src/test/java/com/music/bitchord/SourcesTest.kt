@@ -607,6 +607,19 @@ class SourcesTest {
     }
 
     @Test
+    fun `Commons FLAC is seeded opt-in and preserves an explicit user choice`() {
+        val initial = SourceRegistry.sourcesForInit(emptyList(), forceJioSaavnOff = true)
+        assertFalse(SourceConfig(kind = SourceKind.WIKIMEDIA_COMMONS).enabled)
+        assertFalse(initial.single { it.kind == SourceKind.WIKIMEDIA_COMMONS }.enabled)
+
+        val optedIn = initial.map {
+            if (it.kind == SourceKind.WIKIMEDIA_COMMONS) it.copy(enabled = true) else it
+        }
+        val nextLaunch = SourceRegistry.sourcesForInit(optedIn, forceJioSaavnOff = false)
+        assertTrue(nextLaunch.single { it.kind == SourceKind.WIKIMEDIA_COMMONS }.enabled)
+    }
+
+    @Test
     fun `the opt-in migration disables JioSaavn once for existing installs`() {
         val previouslyEnabled = SourceConfig(kind = SourceKind.JIOSAAVN, enabled = true)
 

@@ -132,6 +132,21 @@ class AudioPipelineTest {
         assertFalse(flacHiRes.isHiQuality)
     }
 
+    @Test
+    fun `claimed flac cannot override the actual lossy Media3 input format`() {
+        val snapshot = NerdStats.Snapshot(
+            mimeType = "audio/opus",
+            bitrateKbps = 160,
+            sampleRateHz = 48_000,
+            channels = 2,
+            claimed = StreamFormat(codec = "flac", kbps = 5000, sampleRateHz = 96_000, bitDepth = 24),
+        )
+
+        assertFalse("Media3 selected Opus; the source claim is not the codec", snapshot.isLossless)
+        assertFalse(snapshot.isHiRes)
+        assertTrue("The lower measured rate/depth should be exposed as a downgrade", snapshot.downgraded)
+    }
+
     // ── Codec Label Resolution ─────────────────────────────────────────────
 
     @Test

@@ -87,8 +87,8 @@ class ChunkedDataSource(
                     // `host` is null exactly when the URL was too broken to
                     // parse, which is the case most in need of naming — so fall
                     // back to the string itself rather than logging "null".
-                    val who = dataSpec.uri.host ?: dataSpec.uri.toString().take(120)
-                    TrackLog.w(TAG, "$who refused the stream: ${e.message}")
+                    val who = dataSpec.uri.host ?: "unparseable audio URI"
+                    TrackLog.w(TAG, "$who refused the stream: ${failureSummary(e)}")
                     report(dataSpec, e)
                 }
                 throw e
@@ -123,8 +123,8 @@ class ChunkedDataSource(
             if (e !is InterruptedIOException) {
                 TrackLog.w(
                     TAG,
-                    "range $position-${position + length - 1} refused for " +
-                        "${spec.uri.getQueryParameter("c")}: ${e.message}",
+                    "range $position-${position + length - 1} refused by " +
+                        "${spec.uri.host ?: "unknown host"}: ${failureSummary(e)}",
                 )
                 // This is the only place a refusal of the *real* fetch is seen.
                 // Left here it is just a failed track; handed back, it is the
@@ -149,6 +149,16 @@ class ChunkedDataSource(
             StreamResolver.onPlaybackRefused(spec.uri.toString(), e.responseCode)
         }
     }
+
+    /** Status is useful; a signed media URL or its query string is not. */
+    private fun failureSummary(error: Exception): String =
+        if (error is HttpDataSource.InvalidResponseCodeException) {
+            "HTTP ${error.responseCode}"
+        } else {
+            (error.message ?: error.javaClass.simpleName)
+                .replace(URL_IN_ERROR, "[URL]")
+                .take(MAX_ERROR_CHARS)
+        }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         if (passthrough) return upstream.read(buffer, offset, length)
@@ -195,6 +205,8 @@ class ChunkedDataSource(
 
     private companion object {
         const val TAG = "BitChord"
+        private val URL_IN_ERROR = Regex("https?://[^\\s\\\"'<>]+", RegexOption.IGNORE_CASE)
+        private const val MAX_ERROR_CHARS = 180
 
         /** Enough to ride out a truncated range, not enough to hang on a dead one. */
         const val MAX_EMPTY_RANGES = 3

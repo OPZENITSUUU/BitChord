@@ -179,6 +179,50 @@ class AddonSourceTest {
         assertTrue("expected Rejected, got $health", health is SourceHealth.Rejected)
     }
 
+    @Test
+    fun `remote addon URLs require HTTPS while debug loopback remains available`() {
+        assertTrue(AddonClient.isSecureUrl("https://addon.example/manifest.json"))
+        assertFalse(AddonClient.isSecureUrl("http://addon.example/manifest.json", allowLoopbackHttp = true))
+        assertTrue(AddonClient.isSecureUrl(server.url("/").toString()))
+    }
+
+    @Test
+    fun `same-origin manifest redirect remains supported`() = runBlocking {
+        route("/manifest.json", MockResponse().setResponseCode(302).setHeader("Location", "/v2/manifest.json"))
+        route("/v2/manifest.json", manifest())
+
+        assertTrue(source().health() is SourceHealth.Ok)
+    }
+
+    @Test
+    fun `cross-origin manifest redirect is refused before the target is contacted`() = runBlocking {
+        route(
+            "/manifest.json",
+            MockResponse().setResponseCode(302).setHeader("Location", "https://example.invalid/manifest.json"),
+        )
+
+        assertTrue(source().health() is SourceHealth.Rejected)
+        assertFalse(seen.any { it.requestUrl?.host == "example.invalid" })
+    }
+
+    @Test
+    fun `non-JSON addon response is rejected`() = runBlocking {
+        route(
+            "/manifest.json",
+            MockResponse().setHeader("Content-Type", "text/html").setBody("<html>not json</html>"),
+        )
+
+        assertTrue(source().health() is SourceHealth.Rejected)
+    }
+
+    @Test
+    fun `oversized addon JSON response is rejected`() = runBlocking {
+        val payload = "{\"padding\":\"${"x".repeat(AddonClient.MAX_JSON_RESPONSE_BYTES)}\"}"
+        route("/manifest.json", json(payload))
+
+        assertTrue(source().health() is SourceHealth.Rejected)
+    }
+
     /** A server that is simply down is worth trying again, and says so differently. */
     @Test
     fun `a server error reads as unreachable`() = runBlocking {
@@ -270,20 +314,14 @@ class AddonSourceTest {
     }
 
     @Test
-    fun `manual refresh asks again for a cached stream URL`() = runBlocking {
+    fun `a later playback asks again instead of reusing a completed stream URL`() = runBlocking {
         route("/manifest.json", manifest())
         route("/stream/track", json("""{"url":"https://cdn/old.flac","codec":"flac"}"""))
         val source = AddonSource(config())
 
         assertEquals("https://cdn/old.flac", source.stream("track", StreamRequest.Lossless)?.url)
         route("/stream/track", json("""{"url":"https://cdn/new.flac","codec":"flac"}"""))
-        // The ordinary path still reuses a recently resolved URL.
-        assertEquals("https://cdn/old.flac", source.stream("track", StreamRequest.Lossless)?.url)
-
-        source.clearCompletedTrackCalls()
-        val refreshed = source.stream("track", StreamRequest.Lossless)
-
-        assertEquals("https://cdn/new.flac", refreshed?.url)
+        assertEquals("https://cdn/new.flac", source.stream("track", StreamRequest.Lossless)?.url)
         assertEquals(2, synchronized(seen) { seen.count { it.requestUrl?.encodedPath == "/stream/track" } })
     }
 
@@ -774,6 +812,14 @@ class AddonSourceTest {
         assertNull(AddonSource(config()).stream("t1", StreamRequest.Lossless))
     }
 
+    @Test
+    fun `a remote cleartext HTTP stream is refused`() = runBlocking {
+        route("/manifest.json", manifest())
+        route("/stream/t1", json("""{"url":"http://music.example/audio.flac","codec":"flac"}"""))
+
+        assertNull(AddonSource(config()).stream("t1", StreamRequest.Lossless))
+    }
+
     /** A 404 on stream is the addon saying it doesn't hold the track. A miss. */
     @Test
     fun `a stream 404 is a miss, not a crash`() = runBlocking {
@@ -949,10 +995,21 @@ class AddonSourceTest {
 
         assertEquals(url, stream.url)
         assertEquals("application/dash+xml", StreamContainer.manifestMimeOf(url))
-        // Nothing named the codec either; "Hi-Res FLAC" in free text is the
-        // whole of the evidence that this is worth playing over YouTube.
-        assertEquals("flac", stream.format.codec)
-        assertEquals(true, stream.format.isLossless)
+        // The source's free-text "Hi-Res FLAC" label is an advertisement, not
+        // proof of the codec. Let decoder telemetry settle the actual format.
+        assertNull(stream.format.codec)
+        assertNull(stream.format.isLossless)
+    }
+
+    @Test
+    fun `a lossless tier label alone does not invent the flac codec`() = runBlocking {
+        route("/manifest.json", manifest())
+        route("/stream/t1", json("""{"url":"https://cdn.example.com/audio/stream","quality":"LOSSLESS"}"""))
+
+        val format = AddonSource(config()).stream("t1", StreamRequest.Lossless)!!.format
+
+        assertNull(format.codec)
+        assertNull(format.isLossless)
     }
 
     /**

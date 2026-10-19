@@ -2,6 +2,8 @@ package com.music.bitchord.data
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -16,8 +18,11 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 
 /**
  * BitChord ships as a sideloaded APK off GitHub Releases rather than through
@@ -36,14 +41,17 @@ object AppUpdateChecker {
         val version: String,
         val releaseUrl: String,
         val apkUrl: String?,
+        val apkSha256: String?,
         /** The release's own Markdown body, shown as this update's "what's new". */
         val notes: String?,
     )
 
     private const val CACHE_SUBDIR = "updates"
+    private const val UPDATE_PREFS = "bitchord_update_state"
+    private const val KEY_DISMISSED_VERSION = "dismissed_release_version"
 
     private const val LATEST_RELEASE_URL =
-        "https://api.github.com/repos/kushagrasinghx/BitChord/releases/latest"
+        "https://api.github.com/repos/OPZENITSUUU/BitChord/releases/latest"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -53,7 +61,11 @@ object AppUpdateChecker {
     /** Where this update's APK download currently stands, for the dialog's progress row. */
     sealed interface DownloadState {
         data object Idle : DownloadState
-        data class Downloading(val fraction: Float) : DownloadState
+        data class Downloading(
+            val fraction: Float?,
+            val downloadedBytes: Long,
+            val totalBytes: Long?,
+        ) : DownloadState
         data class Ready(val file: File) : DownloadState
         data class Failed(val message: String) : DownloadState
     }
@@ -65,7 +77,10 @@ object AppUpdateChecker {
     @Volatile
     private var downloadCancelled = false
 
-    suspend fun check() = withContext(Dispatchers.IO) {
+    suspend fun check(context: Context) = withContext(Dispatchers.IO) {
+        _available.value = null
+        val dismissedVersion = context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_DISMISSED_VERSION, null)
         runCatching {
             val request = Request.Builder().url(LATEST_RELEASE_URL).build()
             val body = Http.client.newCall(request).execute().use { response ->
@@ -74,23 +89,32 @@ object AppUpdateChecker {
             val release = json.parseToJsonElement(body) as? JsonObject ?: return@runCatching
             val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
             val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
-            val apkUrl = apkAssetUrl(release)
+            if (!isPersonalReleaseUrl(url)) return@runCatching
+            val apk = verifiedApkAsset(release)
             val notes = release["body"]?.jsonPrimitive?.contentOrNull
             val latest = tag.removePrefix("v")
-            if (isNewer(latest, BuildConfig.VERSION_NAME)) {
-                _available.value = UpdateInfo(latest, url, apkUrl, notes)
+            if (shouldNotifyUpdate(latest, BuildConfig.VERSION_NAME, dismissedVersion)) {
+                _available.value = UpdateInfo(latest, url, apk?.url, apk?.sha256, notes)
             }
         }
     }
 
+    fun dismiss(context: Context, version: String) {
+        context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_DISMISSED_VERSION, version)
+            .apply()
+        _available.value = null
+    }
+
     /**
-     * Wipes any APK left over from a previous run. Called once at cold start
-     * so a downloaded update is only ever "Install Now" for the session that
-     * downloaded it — the next launch starts clean rather than trying to work
-     * out whether a leftover file is still good.
+     * Clears completed APKs from a previous run, but preserves a partial file
+     * so a later user-approved download can resume with HTTP Range when supported.
      */
     suspend fun clearCache(context: Context) = withContext(Dispatchers.IO) {
-        File(context.cacheDir, CACHE_SUBDIR).listFiles()?.forEach { it.delete() }
+        File(context.cacheDir, CACHE_SUBDIR).listFiles()
+            ?.filterNot { it.name.endsWith(".apk.part") }
+            ?.forEach { it.delete() }
     }
 
     /**
@@ -108,21 +132,49 @@ object AppUpdateChecker {
      * [UpdateInfo.apkUrl] null and the UI falls back to opening the releases
      * page.
      */
-    private fun apkAssetUrl(release: JsonObject): String? = runCatching {
+    internal data class VerifiedApkAsset(val name: String, val url: String, val sha256: String)
+
+    internal fun normalizeSha256Digest(raw: String?): String? {
+        val digest = raw?.let {
+            if (it.startsWith("sha256:", ignoreCase = true)) it.substringAfter(':') else it
+        }?.lowercase() ?: return null
+        return digest.takeIf { it.length == 64 && it.all { character -> character in '0'..'9' || character in 'a'..'f' } }
+    }
+
+    internal fun shouldNotifyUpdate(latest: String, current: String, dismissed: String?): Boolean =
+        latest != dismissed && isNewer(latest, current)
+
+    private fun isPersonalReleaseUrl(value: String): Boolean {
+        val url = value.toHttpUrlOrNull() ?: return false
+        return url.scheme == "https" && url.host == "github.com" &&
+            url.encodedPath.startsWith("/OPZENITSUUU/BitChord/releases/")
+    }
+
+    internal fun verifiedApkAsset(release: JsonObject): VerifiedApkAsset? = runCatching {
         val apks = release["assets"]?.jsonArray
             ?.mapNotNull { it as? JsonObject }
             ?.mapNotNull { asset ->
                 val name = asset["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 val url = asset["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                val ours = name.startsWith(BuildConfig.UPDATE_APK_PREFIX, ignoreCase = true) &&
+                val digest = normalizeSha256Digest(asset["digest"]?.jsonPrimitive?.contentOrNull)
+                    ?: return@mapNotNull null
+                val parsedUrl = url.toHttpUrlOrNull() ?: return@mapNotNull null
+                val safeGithubAsset = parsedUrl.scheme == "https" &&
+                    parsedUrl.host == "github.com" &&
+                    parsedUrl.encodedPath.startsWith("/OPZENITSUUU/BitChord/releases/download/")
+                val isOurApk = name.startsWith(BuildConfig.UPDATE_APK_PREFIX, ignoreCase = true) &&
                     name.endsWith(".apk", ignoreCase = true) &&
                     asset["state"]?.jsonPrimitive?.contentOrNull == "uploaded"
-                if (ours) name.removeSuffix(".apk").removeSuffix(".APK") to url else null
+                if (safeGithubAsset && isOurApk) {
+                    VerifiedApkAsset(name.substringBeforeLast('.'), url, digest)
+                } else {
+                    null
+                }
             }
             .orEmpty()
-        apks.firstOrNull { (name, _) -> '_' !in name }?.second
+        apks.firstOrNull { '_' !in it.name }
             ?: Build.SUPPORTED_ABIS.firstNotNullOfOrNull { abi ->
-                apks.firstOrNull { (name, _) -> name.endsWith("_$abi") }?.second
+                apks.firstOrNull { it.name.endsWith("_$abi") }
             }
     }.getOrNull()
 
@@ -135,25 +187,62 @@ object AppUpdateChecker {
     suspend fun downloadApk(context: Context): Unit = withContext(Dispatchers.IO) {
         val info = _available.value ?: return@withContext
         val url = info.apkUrl ?: return@withContext
+        val expectedSha256 = normalizeSha256Digest(info.apkSha256)
+            ?: run {
+                _download.value = DownloadState.Failed("Release APK has no valid SHA-256 digest")
+                return@withContext
+            }
         downloadCancelled = false
-        _download.value = DownloadState.Downloading(0f)
+        _download.value = DownloadState.Downloading(null, 0L, null)
 
         runCatching {
             val dir = File(context.cacheDir, CACHE_SUBDIR).apply { mkdirs() }
-            // Drop anything left over from an earlier attempt.
-            dir.listFiles()?.forEach { it.delete() }
+            val partial = File(dir, "bitchord-${info.version}.apk.part")
+            dir.listFiles()?.filter { it.name != partial.name }?.forEach { it.delete() }
             val target = File(dir, "bitchord-${info.version}.apk")
-
-            val request = Request.Builder().url(url).build()
+            target.delete()
+            val offset = partial.length()
+            val requestBuilder = Request.Builder()
+                .url(url)
+                .header("Accept-Encoding", "identity")
+            if (offset > 0L) requestBuilder.header("Range", "bytes=$offset-")
+            val request = requestBuilder.build()
             Http.client.newCall(request).execute().use { response ->
+                if (response.code == 416 && offset > 0L) {
+                    partial.delete()
+                    error("Saved partial download is no longer valid; retry to start from the beginning")
+                }
                 check(response.isSuccessful) { "Download failed: HTTP ${response.code}" }
                 val body = response.body ?: error("Empty download body")
-                val total = body.contentLength().takeIf { it > 0 }
+                val append: Boolean
+                val alreadyDownloaded: Long
+                val total: Long?
+                if (offset > 0L && response.code == 206) {
+                    val range = parseContentRange(response.header("Content-Range"))
+                        ?: error("Server returned an invalid Content-Range for resume")
+                    check(range.start == offset) { "Server resumed at the wrong byte offset" }
+                    append = true
+                    alreadyDownloaded = offset
+                    total = range.total
+                } else if (response.code == 200) {
+                    // The server ignored Range; restart safely from the full response.
+                    if (offset > 0L) partial.delete()
+                    append = false
+                    alreadyDownloaded = 0L
+                    total = body.contentLength().takeIf { it > 0 }
+                } else {
+                    error("Server did not honor the requested byte range")
+                }
 
+                var downloaded = alreadyDownloaded
+                _download.value = DownloadState.Downloading(
+                    fraction = total?.let { (downloaded.toFloat() / it).coerceIn(0f, 1f) },
+                    downloadedBytes = downloaded,
+                    totalBytes = total,
+                )
                 body.byteStream().use { input ->
-                    target.outputStream().use { output ->
+                    FileOutputStream(partial, append).use { output ->
                         val buffer = ByteArray(64 * 1024)
-                        var readTotal = 0L
                         while (true) {
                             if (downloadCancelled) {
                                 _download.value = DownloadState.Idle
@@ -162,15 +251,26 @@ object AppUpdateChecker {
                             val read = input.read(buffer)
                             if (read == -1) break
                             output.write(buffer, 0, read)
-                            readTotal += read
-                            total?.let {
-                                _download.value =
-                                    DownloadState.Downloading((readTotal.toFloat() / it).coerceIn(0f, 1f))
-                            }
+                            downloaded += read
+                            _download.value = DownloadState.Downloading(
+                                fraction = total?.let { (downloaded.toFloat() / it).coerceIn(0f, 1f) },
+                                downloadedBytes = downloaded,
+                                totalBytes = total,
+                            )
                         }
                     }
                 }
+                if (total != null) check(downloaded == total) { "Download ended before all bytes arrived" }
             }
+            if (!sha256(partial).equals(expectedSha256, ignoreCase = true)) {
+                partial.delete()
+                error("Downloaded APK failed SHA-256 verification")
+            }
+            if (!hasMatchingInstalledCertificate(context, partial)) {
+                partial.delete()
+                error("Downloaded APK package or signing certificate does not match the installed app")
+            }
+            check(partial.renameTo(target)) { "Could not finalize the verified APK" }
             _download.value = DownloadState.Ready(target)
         }.onFailure { error ->
             _download.value = if (downloadCancelled) {
@@ -178,6 +278,78 @@ object AppUpdateChecker {
             } else {
                 DownloadState.Failed(error.message ?: "Download failed")
             }
+        }
+    }
+
+    private data class ParsedContentRange(val start: Long, val total: Long?)
+
+    private fun parseContentRange(value: String?): ParsedContentRange? {
+        val match = Regex("bytes (\\d+)-\\d+/(\\d+|\\*)").matchEntire(value.orEmpty()) ?: return null
+        val start = match.groupValues[1].toLongOrNull() ?: return null
+        val total = match.groupValues[2].takeUnless { it == "*" }?.toLongOrNull()
+        return ParsedContentRange(start, total)
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+
+    private fun hasMatchingInstalledCertificate(context: Context, apk: File): Boolean = runCatching {
+        val packageManager = context.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+        val installed = packageManager.getPackageInfo(context.packageName, flags)
+        val candidate = packageManager.getPackageArchiveInfo(apk.absolutePath, flags) ?: return false
+        if (candidate.packageName != context.packageName) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val installedInfo = installed.signingInfo ?: return false
+            val candidateInfo = candidate.signingInfo ?: return false
+            signingIdentityCompatible(
+                installedHasMultipleSigners = installedInfo.hasMultipleSigners(),
+                installedCurrentSigners = certificateFingerprints(installedInfo.apkContentsSigners),
+                candidateHasMultipleSigners = candidateInfo.hasMultipleSigners(),
+                candidateCurrentSigners = certificateFingerprints(candidateInfo.apkContentsSigners),
+                candidateSigningHistory = certificateFingerprints(candidateInfo.signingCertificateHistory),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            installed.signatures.orEmpty().toSet() == candidate.signatures.orEmpty().toSet() &&
+                installed.signatures.orEmpty().isNotEmpty()
+        }
+    }.getOrDefault(false)
+
+    private fun certificateFingerprints(signatures: Array<Signature>): Set<String> = signatures.map { signature ->
+        MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }.toSet()
+
+    internal fun signingIdentityCompatible(
+        installedHasMultipleSigners: Boolean,
+        installedCurrentSigners: Set<String>,
+        candidateHasMultipleSigners: Boolean,
+        candidateCurrentSigners: Set<String>,
+        candidateSigningHistory: Set<String>,
+    ): Boolean {
+        if (installedCurrentSigners.isEmpty() || candidateCurrentSigners.isEmpty()) return false
+        return if (installedHasMultipleSigners || candidateHasMultipleSigners) {
+            installedHasMultipleSigners && candidateHasMultipleSigners &&
+                installedCurrentSigners == candidateCurrentSigners
+        } else {
+            installedCurrentSigners.size == 1 && candidateCurrentSigners.size == 1 &&
+                installedCurrentSigners.single() in candidateSigningHistory
         }
     }
 

@@ -3675,12 +3675,26 @@ class PlaybackService : MediaLibraryService() {
         val position = player.currentPosition.coerceAtLeast(0L)
         val attempts = recoveries.getOrDefault(mediaId, 0) + 1
         recoveries[mediaId] = attempts
-        TrackLog.w(
-            "BitChord",
-            "playback failed for $mediaId at ${position}ms (${error.errorCodeName}), attempt $attempts",
-            error,
-            about = mediaId,
-        )
+        var cause: Throwable? = error
+        var httpFailure: androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException? = null
+        repeat(12) {
+            if (cause != null && httpFailure == null) {
+                httpFailure = cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException
+                cause = cause?.cause
+            }
+        }
+        val httpDetail = httpFailure?.let {
+            ", HTTP ${it.responseCode} from ${it.dataSpec.uri.host ?: "unknown host"}"
+        }.orEmpty()
+        val failureLine =
+            "playback failed for $mediaId at ${position}ms (${error.errorCodeName}$httpDetail), attempt $attempts"
+        if (httpFailure != null || error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) {
+            // A stack trace for a signed media URL can carry live query tokens.
+            // ChunkedDataSource and this line retain only status plus host.
+            TrackLog.w("BitChord", failureLine, about = mediaId)
+        } else {
+            TrackLog.w("BitChord", failureLine, error, about = mediaId)
+        }
         // A local file that is not there is the one failure retrying cannot
         // touch, and the only one where the fix is to stop asking for the file.
         //
@@ -5586,8 +5600,8 @@ class PlaybackService : MediaLibraryService() {
 
     private fun publishNerdStats() {
         val player = player ?: return
-        val format = player.audioFormat
         val mediaId = player.currentMediaItem?.mediaId
+        val format = formatForMediaItem(mediaId, audioFormatFor, player.audioFormat)
         val measured = format?.measure()
         // DSD reaches the renderer already decimated to PCM (DsdExtractor), so
         // its sample mime is `audio/raw`; the extractor leaves `dsd64` and the
@@ -5602,15 +5616,15 @@ class PlaybackService : MediaLibraryService() {
 
         val (bitrate, provenance) = when {
             format?.averageBitrate != null && format.averageBitrate > 0 ->
-                Pair((format.averageBitrate + 500) / 1000, TelemetryProvenance.AUTHORITATIVE)
+                Pair((format.averageBitrate + 500) / 1000, TelemetryProvenance.SOURCE_REPORTED)
             format?.bitrate != null && format.bitrate > 0 ->
-                Pair((format.bitrate + 500) / 1000, TelemetryProvenance.AUTHORITATIVE)
+                Pair((format.bitrate + 500) / 1000, TelemetryProvenance.SOURCE_REPORTED)
             mediaId != null && localBitrateCache.containsKey(mediaId) ->
-                Pair(localBitrateCache[mediaId], TelemetryProvenance.AUTHORITATIVE)
+                Pair(localBitrateCache[mediaId], TelemetryProvenance.SOURCE_REPORTED)
             NerdStats.declaredFormat(mediaId)?.kbps != null ->
-                Pair(NerdStats.declaredFormat(mediaId)?.kbps, TelemetryProvenance.AUTHORITATIVE)
+                Pair(NerdStats.declaredFormat(mediaId)?.kbps, TelemetryProvenance.SOURCE_REPORTED)
             NerdStats.pickedBitrateKbps(mediaId) != null ->
-                Pair(NerdStats.pickedBitrateKbps(mediaId), TelemetryProvenance.AUTHORITATIVE)
+                Pair(NerdStats.pickedBitrateKbps(mediaId), TelemetryProvenance.SOURCE_REPORTED)
             dsd == null && isRawPcm && pcmDataRate != null ->
                 Pair(pcmDataRate, TelemetryProvenance.DERIVED)
             else ->

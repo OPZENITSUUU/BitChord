@@ -476,6 +476,21 @@
     <string name="pipeline_bitrate">Bitrate</string>
     <string name="pipeline_pcm_data_rate" translatable="false">PCM Data Rate</string>
     <string name="pipeline_channels">Channels</string>
+    <string name="pipeline_unknown_source" translatable="false">Unknown — source not attributed</string>
+    <string name="pipeline_unknown_format" translatable="false">Unknown — Media3 has not reported this track format</string>
+    <string name="pipeline_unknown_bit_depth" translatable="false">Unknown — bit depth not exposed by the input format</string>
+    <string name="pipeline_unknown_sample_rate" translatable="false">Unknown — sample rate not exposed by the input format</string>
+    <string name="pipeline_unknown_bitrate" translatable="false">Unknown — encoded bitrate not supplied</string>
+    <string name="pipeline_unknown_channels" translatable="false">Unknown — channel count not exposed by the input format</string>
+    <string name="pipeline_unknown_pcm_data_rate" translatable="false">Unknown — sample parameters are incomplete</string>
+    <string name="pipeline_not_applicable_bit_depth" translatable="false">Not applicable — selected input is not lossless</string>
+    <string name="pipeline_not_applicable_pcm_rate" translatable="false">Not applicable — selected input is not lossless</string>
+    <string name="pipeline_source_claim" translatable="false">Source claim</string>
+    <string name="pipeline_provenance_reported" translatable="false">reported</string>
+    <string name="pipeline_provenance_measured" translatable="false">measured</string>
+    <string name="pipeline_provenance_source" translatable="false">source-reported</string>
+    <string name="pipeline_provenance_derived" translatable="false">derived</string>
+    <string name="pipeline_provenance_unknown" translatable="false">provenance unknown</string>
     <string name="pipeline_decoder_name">Decoder Name</string>
     <string name="pipeline_io_rate">I/O Rate</string>
     <string name="pipeline_type">Type</string>

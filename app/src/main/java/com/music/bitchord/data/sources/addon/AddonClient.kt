@@ -1,5 +1,6 @@
 package com.music.bitchord.data.sources.addon
 
+import com.music.bitchord.BuildConfig
 import com.music.bitchord.data.Http
 import com.music.bitchord.data.TrackLog
 import com.music.bitchord.data.settings.AppSettings
@@ -15,6 +16,8 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
@@ -330,6 +333,9 @@ class AddonClient(rawBaseUrl: String) {
      * to log as a fault.
      */
     private suspend fun body(url: String): String = withContext(Dispatchers.IO) {
+        if (!isSecureUrl(url)) {
+            throw AddonException("Addon connections must use HTTPS")
+        }
         var attempt = 0
         while (true) {
             (quietUntilMs - System.currentTimeMillis()).takeIf { it > 0 }?.let { delay(it) }
@@ -341,9 +347,7 @@ class AddonClient(rawBaseUrl: String) {
 
             val wait = client.newCall(request).execute().use { response ->
                 when {
-                    response.isSuccessful ->
-                        return@withContext response.body?.string()?.takeIf { it.isNotBlank() }
-                            ?: throw AddonException("Empty response")
+                    response.isSuccessful -> return@withContext readJsonBody(response)
                     response.code == 404 -> throw AddonNotFound()
                     // A 5xx is a server having a bad minute and will be tried
                     // again on the next track; a 4xx is this app asking for
@@ -364,6 +368,40 @@ class AddonClient(rawBaseUrl: String) {
         // Unreachable: every path out of the loop returns or throws.
         @Suppress("UNREACHABLE_CODE")
         throw AddonException("unreachable")
+    }
+
+    /** Reads only bounded JSON responses; chunked or dishonest lengths are bounded too. */
+    private fun readJsonBody(response: Response): String {
+        val body = response.body
+        val contentType = body.contentType()
+            ?: throw AddonException("Addon response is missing a JSON content type")
+        val jsonMime = contentType.type.equals("application", ignoreCase = true) &&
+            (contentType.subtype.equals("json", ignoreCase = true) ||
+                contentType.subtype.endsWith("+json", ignoreCase = true)) ||
+            contentType.type.equals("text", ignoreCase = true) &&
+            contentType.subtype.equals("json", ignoreCase = true)
+        if (!jsonMime) throw AddonException("Addon response is not JSON")
+        if (body.contentLength() > MAX_JSON_RESPONSE_BYTES) {
+            throw AddonException("Addon JSON response exceeds the 1 MiB limit")
+        }
+
+        val output = ByteArrayOutputStream(8 * 1024)
+        body.byteStream().use { input ->
+            val buffer = ByteArray(8 * 1024)
+            var total = 0
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                if (total > MAX_JSON_RESPONSE_BYTES) {
+                    throw AddonException("Addon JSON response exceeds the 1 MiB limit")
+                }
+                output.write(buffer, 0, count)
+            }
+        }
+        if (output.size() == 0) throw AddonException("Empty response")
+        val charset = contentType.charset(Charsets.UTF_8) ?: Charsets.UTF_8
+        return String(output.toByteArray(), charset)
     }
 
     /** How long to wait after a 429, from the header when it sent one. */
@@ -426,6 +464,7 @@ class AddonClient(rawBaseUrl: String) {
         private val LOW_WORDS = listOf("low", "96", "128", "min")
 
         private const val MANIFEST_SUFFIX = "/manifest.json"
+        const val MAX_JSON_RESPONSE_BYTES = 1_048_576
 
         /**
          * A base URL from whatever the user pasted.
@@ -452,6 +491,18 @@ class AddonClient(rawBaseUrl: String) {
                 trimmed
             }
         }
+
+        /** Remote addon traffic must be TLS-protected; debug loopback is reserved for local tests. */
+        fun isSecureUrl(raw: String, allowLoopbackHttp: Boolean = BuildConfig.DEBUG): Boolean {
+            val url = raw.toHttpUrlOrNull() ?: return false
+            if (url.scheme == "https") return true
+            if (!allowLoopbackHttp || url.scheme != "http") return false
+            return url.host.equals("localhost", ignoreCase = true) ||
+                url.host == "127.0.0.1" || url.host == "::1"
+        }
+
+        private fun sameOrigin(first: okhttp3.HttpUrl, second: okhttp3.HttpUrl): Boolean =
+            first.scheme == second.scheme && first.host == second.host && first.port == second.port
 
         fun manifestUrl(base: String): String = "$base$MANIFEST_SUFFIX"
 
@@ -483,14 +534,13 @@ class AddonClient(rawBaseUrl: String) {
         const val SEARCH_TTL_MS = 10 * 60 * 1000L
 
         /**
-         * How long a stream URL is reused — short, because its expiry is not
-         * ours to set. The spec has addons state `expiresAt`, and the reference
-         * host assumes an hour when they don't; five minutes sits far enough
-         * inside either to be certain, while still covering what actually
-         * repeats: the two candidates one match tries in turn, and the second
-         * look arriving at the same track moments later.
+         * Completed media URLs are not reusable: addons may return signed or
+         * short-lived URLs, and their expiry is outside this client's control.
+         * Zero keeps simultaneous lookups coalesced by [SharedCalls] while a
+         * later playback attempt asks the authorized addon endpoint for a fresh
+         * URL instead of replaying a stale one that can fail with HTTP 401/403.
          */
-        const val STREAM_TTL_MS = 5 * 60 * 1000L
+        const val STREAM_TTL_MS = 0L
 
         private const val MAX_RETRIES = 2
         private const val BACKOFF_BASE_MS = 500L
@@ -520,6 +570,19 @@ class AddonClient(rawBaseUrl: String) {
         private val client: OkHttpClient by lazy {
             Http.client.newBuilder()
                 .callTimeout(20, TimeUnit.SECONDS)
+                .addNetworkInterceptor { chain ->
+                    val request = chain.request()
+                    val response = chain.proceed(request)
+                    val location = response.takeIf { it.isRedirect }?.header("Location")
+                    if (location != null) {
+                        val target = request.url.resolve(location)
+                        if (target == null || !sameOrigin(request.url, target)) {
+                            response.close()
+                            throw AddonException("Addon redirect to a different origin was refused")
+                        }
+                    }
+                    response
+                }
                 .build()
         }
     }

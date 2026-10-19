@@ -8,6 +8,7 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.View
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -96,6 +97,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -238,6 +240,7 @@ import com.music.bitchord.ui.components.FloatingBarsTapGuard
 import com.music.bitchord.ui.components.BottomTab
 import com.music.bitchord.ui.components.FLOATING_BAR_MAX_WIDTH
 import com.music.bitchord.ui.components.FloatingBottomBar
+import com.music.bitchord.ui.components.ColdStartIntro
 import com.music.bitchord.ui.components.GlassNavBar
 import com.music.bitchord.ui.components.floatingtabbar.rememberFloatingTabBarScrollConnection
 import com.music.bitchord.ui.components.FrostedTopBar
@@ -270,6 +273,7 @@ import com.music.bitchord.ui.components.TranslationLanguageDialog
 import com.music.bitchord.ui.components.LyricsSourcesDialog
 import com.music.bitchord.ui.components.ServerEditorHost
 import com.music.bitchord.ui.components.UpdateAvailableDialog
+import com.music.bitchord.ui.components.startupIntroRemainingMs
 import com.music.bitchord.ui.components.WebDavConflictAlert
 import com.music.bitchord.ui.components.FieldConfig
 import com.music.bitchord.ui.icons.BitChordIcons
@@ -368,6 +372,25 @@ class MainActivity : AppCompatActivity() {
             val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
             val highPerformance by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
             val liquidGlassEnabled by AppSettings.liquidGlass.collectAsStateWithLifecycle()
+            val reduceAnimation by AppSettings.reduceAnimation.collectAsStateWithLifecycle()
+            var startupIntroVisible by rememberSaveable { mutableStateOf(savedInstanceState == null) }
+            var startupIntroStartedAt by rememberSaveable {
+                mutableLongStateOf(SystemClock.elapsedRealtime())
+            }
+            LaunchedEffect(startupIntroVisible, reduceAnimation) {
+                if (startupIntroVisible) {
+                    if (reduceAnimation) {
+                        startupIntroVisible = false
+                    } else {
+                        val remaining = startupIntroRemainingMs(
+                            startedAtElapsedMs = startupIntroStartedAt,
+                            nowElapsedMs = SystemClock.elapsedRealtime(),
+                        )
+                        if (remaining > 0L) delay(remaining)
+                        startupIntroVisible = false
+                    }
+                }
+            }
             val iosOverscrollFactory = rememberIosOverscrollFactory()
             val performanceRefreshRate by AppSettings.performanceRefreshRate.collectAsStateWithLifecycle()
             val composeView = LocalView.current
@@ -413,12 +436,18 @@ class MainActivity : AppCompatActivity() {
                 // longer exists and a page squeezed to a sliver to pay for it.
                 // A measured constraint cannot be stale — it is the very width
                 // the split is about to be laid out in.
-                BoxWithConstraints(Modifier.fillMaxSize()) {
-                    BitChordApp(
-                        darkTheme = darkTheme,
-                        windowWidth = maxWidth,
-                        windowHeight = maxHeight,
-                        appBackdrop = appBackdrop,
+                Box(Modifier.fillMaxSize()) {
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                        BitChordApp(
+                            darkTheme = darkTheme,
+                            windowWidth = maxWidth,
+                            windowHeight = maxHeight,
+                            appBackdrop = appBackdrop,
+                        )
+                    }
+                    ColdStartIntro(
+                        visible = startupIntroVisible,
+                        onSkip = { startupIntroVisible = false },
                     )
                 }
                 }
@@ -2225,6 +2254,7 @@ private fun BitChordApp(
             albumName = current.albumName ?: extra.albumName,
         )
     }
+    val playbackSpeed by AppSettings.playbackSpeed.collectAsStateWithLifecycle()
     // The three-dot menu snapshots the track into songActions when it's opened,
     // so a menu opened before the lookup above resolves would otherwise be
     // stuck without album/artist rows even after the ids come in. Keep it in
@@ -2331,6 +2361,11 @@ private fun BitChordApp(
             repeatMode = player.repeatMode,
             shuffleEnabled = shuffleEnabled,
             autoplayEnabled = autoplayEnabled,
+            playbackSpeed = playbackSpeed,
+            onPlaybackSpeedChange = { speed ->
+                AppSettings.setPlaybackSpeed(speed)
+                controller?.setPlaybackSpeed(speed)
+            },
             signedIn = signedIn,
             likeStatus = likeStatuses[song.videoId] ?: LikeStatus.INDIFFERENT,
             onToggleLike = { viewModel.toggleLike(song.videoId) },
@@ -5003,15 +5038,20 @@ private fun BitChordApp(
                 UpdateAvailableDialog(
                     version = update.version,
                     notes = update.notes,
+                    canDownload = update.apkUrl != null,
                     hazeState = hazeState,
                     // A download in progress keeps running behind the closed
                     // sheet — only the sheet itself goes away. The top bar's
                     // update icon reopens it onto whatever state it reached.
-                    onDismiss = { showUpdateDialog = false },
+                    onDismiss = {
+                        AppUpdateChecker.dismiss(context, update.version)
+                        showUpdateDialog = false
+                    },
                     onDownload = {
                         if (update.apkUrl != null) {
                             scope.launch { AppUpdateChecker.downloadApk(context) }
                         } else {
+                            AppUpdateChecker.dismiss(context, update.version)
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)))
                             showUpdateDialog = false
                         }
@@ -5025,6 +5065,7 @@ private fun BitChordApp(
                     },
                     onOpenReleasePage = {
                         AppUpdateChecker.resetDownload()
+                        AppUpdateChecker.dismiss(context, update.version)
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)))
                         showUpdateDialog = false
                     },

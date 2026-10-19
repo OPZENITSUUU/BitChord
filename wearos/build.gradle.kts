@@ -17,7 +17,7 @@ plugins {
  * It has to share the phone app's application id *and* signing key, because the
  * Wearable Data Layer only delivers between apps that match on both. So:
  *   dev  -> com.dev.bitchord   pairs only with the phone's dev build
- *   prod -> com.music.bitchord pairs only with the phone's prod build
+ *   prod/personal -> com.music.bitchord pairs only with the phone's prod/personal build
  * and each build type is signed exactly the way the phone's is (debug key for
  * debug, the release keystore for release), so a watch build pairs with the
  * phone build of the same variant.
@@ -29,6 +29,7 @@ val signing = Properties().apply {
 }
 
 val betaSuffix = rootProject.extra["bitchordBetaSuffix"] as String
+val personalAppName = providers.gradleProperty("bitchordAppName").orElse("BitChord Personal").get()
 
 android {
     namespace = "com.music.bitchord.wear"
@@ -59,6 +60,11 @@ android {
         create("prod") {
             dimension = "env"
             resValue("string", "app_name", "BitChord")
+        }
+        create("personal") {
+            dimension = "env"
+            applicationId = "com.music.bitchord"
+            resValue("string", "app_name", personalAppName)
         }
     }
 
