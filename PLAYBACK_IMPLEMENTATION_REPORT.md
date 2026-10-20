@@ -220,3 +220,34 @@ For the precise on-device procedure, see [PLAYBACK_TESTING.md](PLAYBACK_TESTING.
 
 [1]: https://commons.wikimedia.org/wiki/File:01_-_Gute_Nacht_%28CK_2946-2%2C_ES_383%29.flac "Public-domain Schubert FLAC file page"
 [2]: https://www.mediawiki.org/wiki/API:Imageinfo "MediaWiki image metadata API"
+
+
+## Follow-on UI, source preference, playlist, and CSV recovery pass (2026-10-20)
+
+### Implemented in source
+
+- Settings now has a search field, category landing cards and category filtering styled to the supplied dark Settings reference, plus the requested `Made by OPZENITSU69` footer.
+- The song action menu now persists Hide from Home / Show on Home by exact video ID; it filters only recommendation Home shelves and leaves library, queue, downloads, and search untouched.
+- A Home-only Listen Together control is placed immediately left of the profile control.
+- Bottom navigation now displays Home → Search → Explore → Library while mapping to the existing internal route IDs.
+- Adding a song to selected playlists performs a video-ID duplicate preflight. If any duplicates are found, the dialog names affected playlists and offers Cancel, Skip duplicate, or Keep both. A failed playlist fetch aborts rather than silently adding to an unverifiable playlist.
+- Settings has an opt-in Automatic best source preference. It waits for enabled matching sources and compares their resolved `StreamFormat` metadata (codec/lossless classification/bitrate), not a catalogue label. This is source-reported/resolver metadata and does not establish the actual Android output format; no real provider stream or device playback was verified in this pass.
+- Full JSON backup/restore remains available. Added separate CSV export/import for monthly listening history. CSV rows are spreadsheet-readable and contain a Base64-encoded full bucket payload for lossless round-trip of internal day/hour/chart details. CSV is history-only; it does not contain preferences, credentials, or settings. Import validates all rows before replacing history and requires the user's confirmation.
+- Neutral equalizer branding and OPZENITSU69 app display name/logo edits from the same working branch remain in the build. Application ID remains `com.music.bitchord`.
+
+### Verification
+
+- `:app:compilePersonalDebugKotlin`: **passed**.
+- `:app:testPersonalDebugUnitTest`: **passed** — 1,103 tests, 0 failures, 0 errors, 1 skipped. The skipped case is `GeniusTest.live genius search and scraping test with noisy titles`.
+- `:app:assemblePersonalDebug`: **passed**.
+- `:app:assemblePersonalDebugAndroidTest`: **passed** (instrumentation package compiles; no device execution).
+- `git diff --check`: **passed**.
+- No ADB device is attached. Settings interactions, duplicate decision behavior against a live account, CSV picker round-trip, and online playback were not device-tested.
+
+### Current APK
+
+- `app/build/outputs/apk/personal/debug/app-personal-universal-debug.apk`
+- 205,409,679 bytes; SHA-256 `627d862c0850ecd907946eb3305aa4a8ee31d2d79cd79f378cc93a46ae51bd76`.
+- Package `com.music.bitchord`, version `1.8.1-beta1`, version code 28.
+- Android debug certificate SHA-256 `ac90f65637b18f5a290f9ac4862d7c2361515930757447b17178def668334653`.
+- No installed app/device was available for certificate comparison. This debug APK is not asserted to be update-compatible with any release-signed installation. No app was installed, uninstalled, or had its data cleared.

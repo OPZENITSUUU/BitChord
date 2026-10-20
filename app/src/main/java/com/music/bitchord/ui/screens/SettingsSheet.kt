@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Animation
@@ -199,6 +200,7 @@ fun SettingsScreen(
     val wifiQuality by AppSettings.audioQualityWifi.collectAsStateWithLifecycle()
     val cellularQuality by AppSettings.audioQualityCellular.collectAsStateWithLifecycle()
     val metered by AppSettings.meteredConnection.collectAsStateWithLifecycle()
+    val automaticBestSource by AppSettings.automaticSourceSelection.collectAsStateWithLifecycle()
     val crossfade by AppSettings.crossfadeSeconds.collectAsStateWithLifecycle()
     val smartFade by AppSettings.smartFadeEnabled.collectAsStateWithLifecycle()
     val automixPerformance by AppSettings.automixPerformanceMode.collectAsStateWithLifecycle()
@@ -286,6 +288,7 @@ fun SettingsScreen(
     // Filters the rows below — see [SettingsSearch]. Blank shows everything,
     // exactly as if the field weren't there.
     var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by rememberSaveable { mutableStateOf<SettingsCategory?>(null) }
     var picking by remember { mutableStateOf<QualityTarget?>(null) }
     var pickingDownloadQuality by remember { mutableStateOf(false) }
     var pickingAutomixPerformance by remember { mutableStateOf(false) }
@@ -296,6 +299,7 @@ fun SettingsScreen(
     var exportStatus by remember { mutableStateOf<String?>(null) }
     var importStatus by remember { mutableStateOf<String?>(null) }
     var confirmImport by remember { mutableStateOf(false) }
+    var confirmCsvImport by remember { mutableStateOf(false) }
     var confirmClearSongCache by remember { mutableStateOf(false) }
     var showPerformanceWarning by remember { mutableStateOf(false) }
     var showPerformanceConfirmation by remember { mutableStateOf(false) }
@@ -356,6 +360,28 @@ fun SettingsScreen(
             )
         }
     }
+    val exportCsvPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { target ->
+        if (target == null) return@rememberLauncherForActivityResult
+        backupScope.launch {
+            exportStatus = Backup.exportListeningCsvTo(context, target).fold(
+                onSuccess = { context.getString(R.string.csv_export_succeeded, it) },
+                onFailure = { context.getString(R.string.export_failed, it.message ?: context.getString(R.string.unknown_error)) },
+            )
+        }
+    }
+    val importCsvPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { source ->
+        if (source == null) return@rememberLauncherForActivityResult
+        backupScope.launch {
+            importStatus = Backup.importListeningCsvFrom(context, source).fold(
+                onSuccess = { context.getString(R.string.csv_import_succeeded, it) },
+                onFailure = { context.getString(R.string.import_failed, it.message ?: context.getString(R.string.unknown_error)) },
+            )
+        }
+    }
     var showListenBrainzTokenDialog by remember { mutableStateOf(false) }
     var showLastfmLoginDialog by remember { mutableStateOf(false) }
     val scrobbleScope = rememberCoroutineScope()
@@ -369,13 +395,13 @@ fun SettingsScreen(
     // Made fresh on every pass rather than remembered: it tallies the rows
     // that answered to the query, and that tally has to start from zero each
     // time the query changes.
-    val search = SettingsSearch(searchQuery)
+    val search = SettingsSearch(searchQuery, selectedCategory)
 
     // What is left after a keystroke is a different list, and the offset the
     // last one was scrolled to means nothing in it.
     val scrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
     var isFirstSearchComposition by remember { mutableStateOf(true) }
-    LaunchedEffect(searchQuery) {
+    LaunchedEffect(searchQuery, selectedCategory) {
         if (isFirstSearchComposition && searchQuery.isEmpty()) {
             // Skip the initial composition during Activity recreation:
             // rememberSaveable already restored the scroll position.
@@ -392,21 +418,52 @@ fun SettingsScreen(
             .verticalScroll(scrollState)
             .padding(contentPadding),
     ) {
+        if (selectedCategory != null) {
+            Box(
+                modifier = Modifier
+                    .padding(start = 20.dp, top = 4.dp, bottom = 10.dp)
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable {
+                        selectedCategory = null
+                        searchQuery = ""
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = stringResource(R.string.back),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
         Text(
-            text = stringResource(R.string.settings),
+            text = selectedCategory?.let { stringResource(it.titleRes) } ?: stringResource(R.string.settings),
             style = MaterialTheme.typography.displayLarge,
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp),
         )
         SearchField(
             query = searchQuery,
-            onQueryChange = { searchQuery = it },
+            onQueryChange = {
+                searchQuery = it
+                if (it.isNotBlank()) selectedCategory = null
+            },
             onSubmit = {},
             placeholder = stringResource(R.string.settings_search_hint),
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp),
         )
 
-        SearchableSettingsGroup(search) {
+        if (search.showCategoryLanding) {
+            Spacer(Modifier.height(8.dp))
+            SettingsCategory.entries.forEach { category ->
+                SettingsCategoryCard(category) { selectedCategory = category }
+            }
+            Spacer(Modifier.height(18.dp))
+        }
+
+        SearchableSettingsGroup(search, category = SettingsCategory.ACCOUNT) {
             val accountTitle = stringResource(R.string.account_integrations)
             // What the row opens is the scrobbling screen, so the services it
             // signs into are worth typing at this field even though none of
@@ -452,6 +509,25 @@ fun SettingsScreen(
                     title = sourceTitle,
                     subtitle = sourceSubtitle,
                     onClick = onSources,
+                )
+            }
+            val automaticBestSourceTitle = stringResource(R.string.automatic_best_source_title)
+            row(automaticBestSourceTitle, "automatic", "highest bitrate", "quality", "source") {
+                SettingsRow(
+                    icon = Icons.Rounded.AutoAwesome,
+                    title = automaticBestSourceTitle,
+                    subtitle = stringResource(R.string.automatic_best_source_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = automaticBestSource,
+                            onCheckedChange = AppSettings::setAutomaticSourceSelection,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setAutomaticSourceSelection(!automaticBestSource) },
                 )
             }
             val onWifiTitle = stringResource(R.string.on_wifi)
@@ -1230,7 +1306,7 @@ fun SettingsScreen(
 
         // Only in a build that carries the watch app — see app/build.gradle.kts.
         if (remember { WatchInstaller.available(context) }) {
-            SearchableSettingsGroup(search) {
+            SearchableSettingsGroup(search, category = SettingsCategory.MORE) {
                 row(stringResource(R.string.wear_os_section), "watch", "wear os", "galaxy watch", "pixel watch", "install") {
                     WearOsSettingsRow(onClick = onWearOs)
                 }
@@ -1286,6 +1362,24 @@ fun SettingsScreen(
                     title = importDataTitle,
                     subtitle = importStatus ?: stringResource(R.string.import_data_subtitle),
                     onClick = { confirmImport = true },
+                )
+            }
+            val exportCsvTitle = stringResource(R.string.export_listening_csv)
+            row(exportCsvTitle, "csv", "spreadsheet", "listening history") {
+                SettingsRow(
+                    icon = Icons.Rounded.FileUpload,
+                    title = exportCsvTitle,
+                    subtitle = stringResource(R.string.export_listening_csv_subtitle),
+                    onClick = { exportCsvPicker.launch("bitchord-listening-${java.time.LocalDate.now()}.csv") },
+                )
+            }
+            val importCsvTitle = stringResource(R.string.import_listening_csv)
+            row(importCsvTitle, "csv", "spreadsheet", "restore listening history") {
+                SettingsRow(
+                    icon = Icons.Rounded.FileDownload,
+                    title = importCsvTitle,
+                    subtitle = importStatus ?: stringResource(R.string.import_listening_csv_subtitle),
+                    onClick = { confirmCsvImport = true },
                 )
             }
         }
@@ -1550,16 +1644,17 @@ fun SettingsScreen(
 
         // Read after every group above has had its turn at the query, which is
         // what makes this an accurate "nothing here" rather than a guess.
-        if (!search.anyMatch) {
+        if (!search.showCategoryLanding && !search.anyMatch) {
             MessageState(stringResource(R.string.settings_search_empty, searchQuery))
         }
 
         // The version line is the page's colophon, not a setting: it belongs to
         // the whole list, so it goes when the list is narrowed to a few rows.
-        if (searchQuery.isBlank()) {
+        if (searchQuery.isBlank() && selectedCategory == null) {
+        val appName = stringResource(R.string.app_name)
         Text(
             text = buildAnnotatedString {
-                append("bitchord $version  ")
+                append("$appName $version  ")
                 val linkStyles = TextLinkStyles(
                     style = SpanStyle(
                         color = MaterialTheme.colorScheme.primary,
@@ -1590,6 +1685,17 @@ fun SettingsScreen(
                 .fillMaxWidth()
                 .padding(top = 24.dp, bottom = 8.dp),
         )
+        }
+        if (searchQuery.isBlank()) {
+            Text(
+                text = stringResource(R.string.settings_made_by),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 54.dp, bottom = 28.dp),
+            )
         }
     }
 
@@ -1697,6 +1803,27 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmImport = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    if (confirmCsvImport) {
+        AlertDialog(
+            onDismissRequest = { confirmCsvImport = false },
+            title = { Text(stringResource(R.string.import_listening_csv)) },
+            text = { Text(stringResource(R.string.csv_import_warning)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmCsvImport = false
+                    importCsvPicker.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*"))
+                }) {
+                    Text(stringResource(R.string.csv_choose_file))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmCsvImport = false }) {
                     Text(stringResource(R.string.cancel))
                 }
             },
@@ -2283,24 +2410,83 @@ internal val ICON_GAP = 14.dp
 /** Where a row's text starts — dividers are inset to match, as on iOS. */
 internal val TEXT_INSET = ROW_INSET + ICON_SIZE + ICON_GAP
 
+private enum class SettingsCategory(val titleRes: Int, val subtitleRes: Int, val icon: ImageVector) {
+    ACCOUNT(R.string.settings_category_account_title, R.string.settings_category_account_subtitle, Icons.Rounded.Person),
+    AUDIO(R.string.settings_category_audio_title, R.string.settings_category_audio_subtitle, Icons.Rounded.GraphicEq),
+    DOWNLOADS(R.string.settings_category_downloads_title, R.string.settings_category_downloads_subtitle, Icons.Rounded.Download),
+    APPEARANCE(R.string.settings_category_appearance_title, R.string.settings_category_appearance_subtitle, Icons.Rounded.Brightness4),
+    LIBRARY(R.string.settings_category_library_title, R.string.settings_category_library_subtitle, Icons.Rounded.LibraryMusic),
+    DATA(R.string.settings_category_data_title, R.string.settings_category_data_subtitle, Icons.Rounded.BarChart),
+    LANGUAGE(R.string.settings_category_language_title, R.string.settings_category_language_subtitle, Icons.Rounded.Language),
+    MORE(R.string.settings_category_more_title, R.string.settings_category_more_subtitle, Icons.Rounded.Tune),
+}
+
+@Composable
+private fun SettingsCategoryCard(category: SettingsCategory, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .heightIn(min = 82.dp)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = category.icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(24.dp),
+        )
+        Column(
+            modifier = Modifier.weight(1f).padding(start = 14.dp, end = 8.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = stringResource(category.titleRes),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = stringResource(category.subtitleRes),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
 /**
  * What is typed into the field under the Settings title, and whether anything
- * on the screen has answered to it.
- *
- * A blank query matches everything, so the screen with the field untouched is
- * the screen as it was before there was a field. Rows ask [matches] as they
- * are composed; the empty state at the foot of the list reads [anyMatch] after
- * every group has had its turn, which is why this is made fresh on each pass
- * rather than remembered.
+ * on the screen has answered to it. Blank at the top level shows category cards;
+ * a blank query inside a category shows that category's rows. Rows ask [matches]
+ * as they are composed, and the empty state reads [anyMatch] after all groups.
  */
-private class SettingsSearch(query: String) {
+private class SettingsSearch(query: String, val selectedCategory: SettingsCategory?) {
     // Trimmed, because a trailing space is a typo rather than a search for
     // something ending in one — and on a phone keyboard it is one keystroke
     // away from every word typed.
     private val needle = query.trim()
+    val showCategoryLanding = selectedCategory == null && needle.isEmpty()
 
     var anyMatch = false
         private set
+
+    fun shouldShow(category: SettingsCategory): Boolean =
+        !showCategoryLanding && (selectedCategory == null || selectedCategory == category)
 
     fun matches(vararg keywords: String?): Boolean {
         val hit = needle.isEmpty() ||
@@ -2349,11 +2535,24 @@ private class SettingsGroupScope(
 @Composable
 private fun SearchableSettingsGroup(
     search: SettingsSearch,
+    category: SettingsCategory? = null,
     header: String? = null,
     footer: String? = null,
     topSpacing: Dp = 26.dp,
     content: @Composable SettingsGroupScope.() -> Unit,
 ) {
+    val inferredCategory = category ?: when (header) {
+        stringResource(R.string.audio_quality), stringResource(R.string.playback) -> SettingsCategory.AUDIO
+        stringResource(R.string.downloads) -> SettingsCategory.DOWNLOADS
+        stringResource(R.string.appearance) -> SettingsCategory.APPEARANCE
+        stringResource(R.string.local_music), stringResource(R.string.storage) -> SettingsCategory.LIBRARY
+        stringResource(R.string.your_data) -> SettingsCategory.DATA
+        stringResource(R.string.language) -> SettingsCategory.LANGUAGE
+        stringResource(R.string.performance), stringResource(R.string.miscellaneous),
+        stringResource(R.string.advanced_options) -> SettingsCategory.MORE
+        else -> SettingsCategory.MORE
+    }
+    if (!search.shouldShow(inferredCategory)) return
     val scope = SettingsGroupScope(search, header)
     scope.content()
     if (scope.entries.isEmpty()) return

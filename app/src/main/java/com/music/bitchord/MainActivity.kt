@@ -72,6 +72,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Person
@@ -80,6 +81,8 @@ import androidx.compose.material.icons.rounded.Upgrade
 import com.music.bitchord.data.listentogether.ServerConnectionState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -682,6 +685,10 @@ private fun BitChordApp(
     // Separate from [songActions] so the menu can close behind it — the picker
     // is the next step, not a second sheet stacked on the first.
     var playlistTarget by remember { mutableStateOf<Song?>(null) }
+    var checkingPlaylistDuplicates by remember { mutableStateOf(false) }
+    var duplicatePlaylistDecision by remember {
+        mutableStateOf<Triple<Song, List<UserPlaylist>, List<UserPlaylist>>?>(null)
+    }
     // The picker opened from the Library tab, where there is no track and
     // creating the playlist is the whole errand.
     var creatingPlaylist by remember { mutableStateOf(false) }
@@ -1181,14 +1188,16 @@ private fun BitChordApp(
     val replayLabel = stringResource(R.string.replay)
     val queueLabel = stringResource(R.string.queue)
     val sharedLinkLabel = stringResource(R.string.shared_link)
-    val tabs = remember(homeLabel, exploreLabel, libraryLabel, searchLabel) {
+    val tabs = remember(homeLabel, searchLabel, exploreLabel, libraryLabel) {
         listOf(
             BottomTab(homeLabel, BitChordIcons.Home),
+            BottomTab(searchLabel, BitChordIcons.TabSearch),
             BottomTab(exploreLabel, BitChordIcons.TabExplore),
             BottomTab(libraryLabel, BitChordIcons.TabLibrary),
-            BottomTab(searchLabel, BitChordIcons.TabSearch),
         )
     }
+    val tabRoutes = listOf(TAB_HOME, TAB_SEARCH, TAB_EXPLORE, TAB_LIBRARY)
+    val selectedBarIndex = tabRoutes.indexOf(selectedTab).coerceAtLeast(0)
 
     val scope = rememberCoroutineScope()
 
@@ -3930,6 +3939,19 @@ private fun BitChordApp(
                             // [TopBarDownloadButton], which decides that for
                             // itself rather than being told.
                             TopBarDownloadButton(onClick = { showDownloadManager = true })
+                            if (selectedTab == TAB_HOME && detail == null && libraryShowAll == null &&
+                                !showListenTogether && !showHistory && !showReplay && !showSources &&
+                                !showWearOs && !showEqualizer && !showDiscord && !showSpotify &&
+                                !showSpotifyCanvasAuth
+                            ) {
+                                IconButton(onClick = { showListenTogether = true }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Groups,
+                                        contentDescription = stringResource(R.string.listen_together),
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
                             // Not on a release page, whose pill already carries
                             // three of its own controls — Apple Music leaves the
                             // profile off its album pages too.
@@ -3967,6 +3989,7 @@ private fun BitChordApp(
 
                 // One tab handler, whichever bar is drawing it.
                 val onTabSelected: (Int) -> Unit = { index ->
+                    val route = tabRoutes.getOrElse(index) { TAB_HOME }
                     viewModel.clearDetail()
                     viewModel.closeMoodGenre()
                     showSettings = false
@@ -3979,11 +4002,11 @@ private fun BitChordApp(
                     settingsSubScreen = null
                     showHistory = false
                     libraryShowAll = null
-                    selectedTab = index
+                    selectedTab = route
 
                     // Every search tab tap resets the field, focuses it, and opens
                     // the keyboard through SearchScreen's focus request.
-                    if (index == TAB_SEARCH) {
+                    if (route == TAB_SEARCH) {
                         viewModel.onQueryChange("")
                         searchFocusRequested = true
                     }
@@ -4003,7 +4026,7 @@ private fun BitChordApp(
                     // and the pair folds together on scroll. See [GlassNavBar].
                     GlassNavBar(
                         tabs = tabs,
-                        selectedIndex = selectedTab,
+                        selectedIndex = selectedBarIndex,
                         onTabSelected = onTabSelected,
                         scrollConnection = navBarScroll,
                         song = player.song,
@@ -4066,7 +4089,7 @@ private fun BitChordApp(
                     }
                     FloatingBottomBar(
                         tabs = tabs,
-                        selectedIndex = selectedTab,
+                        selectedIndex = selectedBarIndex,
                         hazeState = hazeState,
                         onTabSelected = onTabSelected,
                     )
@@ -4255,6 +4278,8 @@ private fun BitChordApp(
             // read off the player's own visibility any more, because on a
             // tablet the player is visible whatever the menu was opened from.
             val fromPlayer = menuFromPlayer
+            val hiddenHomeSongIds by viewModel.hiddenHomeSongIds.collectAsStateWithLifecycle()
+            val hiddenFromHome = song.videoId in hiddenHomeSongIds
             val share: () -> Unit = {
                 val sendIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
@@ -4442,6 +4467,19 @@ private fun BitChordApp(
                 onOpenArtist = { id ->
                     openPage(id, song.artist, context.getString(R.string.artist), BrowseType.ARTIST)
                 },
+                onHideFromHome = if (song.localUri == null) {
+                    {
+                        viewModel.setHomeSongHidden(song.videoId, !hiddenFromHome)
+                        songActions = null
+                        showQueueNotice(
+                            context.getString(
+                                if (hiddenFromHome) R.string.home_song_shown_notice
+                                else R.string.home_song_hidden_notice,
+                            ),
+                        )
+                    }
+                } else null,
+                hiddenFromHome = hiddenFromHome,
                 // Only the player's copy of a track is ever missing these
                 // and backfilling — a row opened from a list already has
                 // whatever ids it's ever going to have.
@@ -4618,22 +4656,32 @@ private fun BitChordApp(
                     startCreating = target == null,
                     onAdd = { picked ->
                         target?.let { song ->
-                            viewModel.addToPlaylists(picked, song) { added, alreadyThere, failed ->
-                                // One line for the whole batch, saying the
-                                // outcome that matters most: what went in, else
-                                // that it was all there already, else that it
-                                // didn't work.
-                                showQueueNotice(
-                                    when {
-                                        added > 1 -> context.resources.getQuantityString(
-                                            R.plurals.added_to_playlists_notice, added, added,
+                            checkingPlaylistDuplicates = true
+                            viewModel.findPlaylistDuplicates(picked, song) { duplicates, unverifiable ->
+                                checkingPlaylistDuplicates = false
+                                when {
+                                    unverifiable.isNotEmpty() -> showQueueNotice(
+                                        context.getString(
+                                            R.string.duplicate_playlist_check_failed,
+                                            unverifiable.joinToString { it.title },
+                                        ),
+                                    )
+                                    duplicates.isNotEmpty() -> {
+                                        duplicatePlaylistDecision = Triple(song, picked, duplicates)
+                                    }
+                                    else -> viewModel.addToPlaylists(picked, song) { added, _, failed ->
+                                        showQueueNotice(
+                                            when {
+                                                added > 1 -> context.resources.getQuantityString(
+                                                    R.plurals.added_to_playlists_notice, added, added,
+                                                )
+                                                added == 1 -> context.getString(R.string.song_added_to_playlist)
+                                                failed > 0 -> context.getString(R.string.failed)
+                                                else -> context.getString(R.string.song_already_in_playlist)
+                                            },
                                         )
-                                        added == 1 -> context.getString(R.string.song_added_to_playlist)
-                                        alreadyThere > 0 && failed == 0 ->
-                                            context.getString(R.string.song_already_in_playlist)
-                                        else -> context.getString(R.string.failed)
-                                    },
-                                )
+                                    }
+                                }
                             }
                         }
                         dismiss()
@@ -4644,6 +4692,78 @@ private fun BitChordApp(
                     },
                 )
             }
+        }
+
+        if (checkingPlaylistDuplicates) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text(stringResource(R.string.duplicate_playlist_checking)) },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                        Text(
+                            text = stringResource(R.string.duplicate_playlist_checking),
+                            modifier = Modifier.padding(start = 14.dp),
+                        )
+                    }
+                },
+                confirmButton = {},
+            )
+        }
+
+        duplicatePlaylistDecision?.let { (song, selectedPlaylists, duplicates) ->
+            val duplicateNames = duplicates.joinToString { it.title }
+            AlertDialog(
+                onDismissRequest = { duplicatePlaylistDecision = null },
+                title = { Text(stringResource(R.string.duplicate_playlist_title)) },
+                text = { Text(stringResource(R.string.duplicate_playlist_message, duplicateNames)) },
+                dismissButton = {
+                    TextButton(onClick = { duplicatePlaylistDecision = null }) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+                confirmButton = {
+                    Row {
+                        TextButton(onClick = {
+                            duplicatePlaylistDecision = null
+                            val unique = selectedPlaylists.filterNot { selected ->
+                                duplicates.any { it.playlistId == selected.playlistId }
+                            }
+                            if (unique.isEmpty()) {
+                                showQueueNotice(context.getString(R.string.song_already_in_playlist))
+                            } else {
+                                viewModel.addToPlaylists(unique, song) { added, _, failed ->
+                                    showQueueNotice(
+                                        when {
+                                            added > 1 -> context.resources.getQuantityString(
+                                                R.plurals.added_to_playlists_notice, added, added,
+                                            )
+                                            added == 1 -> context.getString(R.string.song_added_to_playlist)
+                                            failed > 0 -> context.getString(R.string.failed)
+                                            else -> context.getString(R.string.song_already_in_playlist)
+                                        },
+                                    )
+                                }
+                            }
+                        }) { Text(stringResource(R.string.duplicate_playlist_skip)) }
+                        TextButton(onClick = {
+                            duplicatePlaylistDecision = null
+                            viewModel.addToPlaylists(selectedPlaylists, song, allowDuplicates = true) { added, _, failed ->
+                                showQueueNotice(
+                                    when {
+                                        added > 1 -> context.resources.getQuantityString(
+                                            R.plurals.added_to_playlists_notice, added, added,
+                                        )
+                                        added == 1 -> context.getString(R.string.song_added_to_playlist)
+                                        failed > 0 -> context.getString(R.string.failed)
+                                        else -> context.getString(R.string.song_already_in_playlist)
+                                    },
+                                )
+                            }
+                        }) { Text(stringResource(R.string.duplicate_playlist_keep_both)) }
+                    }
+                },
+            )
         }
 
         if (showSpotifyImportDialog) {

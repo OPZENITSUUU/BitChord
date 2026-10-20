@@ -161,6 +161,8 @@ object AppSettings {
      */
     val audioQualityWifi = MutableStateFlow(AudioQuality.LOSSLESS)
     val audioQualityCellular = MutableStateFlow(AudioQuality.LOSSLESS)
+    /** Compare enabled source streams and prefer the best reported codec/bitrate per track. */
+    val automaticSourceSelection = MutableStateFlow(false)
 
     /** Allowed duration difference when replacing a playing stream with one from a source. */
     val upgradeLengthSlackSeconds = MutableStateFlow(DEFAULT_UPGRADE_LENGTH_SLACK_SECONDS)
@@ -808,6 +810,7 @@ object AppSettings {
         migrateSingleQuality()
         audioQualityWifi.value = readQuality(KEY_QUALITY_WIFI)
         audioQualityCellular.value = readQuality(KEY_QUALITY_CELLULAR)
+        automaticSourceSelection.value = prefs.getBoolean(KEY_AUTOMATIC_SOURCE_SELECTION, false)
         upgradeLengthSlackSeconds.value = prefs.getInt(
             KEY_UPGRADE_LENGTH_SLACK_SECONDS,
             DEFAULT_UPGRADE_LENGTH_SLACK_SECONDS,
@@ -1087,6 +1090,11 @@ object AppSettings {
     fun setAudioQualityCellular(value: AudioQuality) {
         audioQualityCellular.value = value
         prefs.edit().putString(KEY_QUALITY_CELLULAR, value.name).apply()
+    }
+
+    fun setAutomaticSourceSelection(value: Boolean) {
+        automaticSourceSelection.value = value
+        prefs.edit().putBoolean(KEY_AUTOMATIC_SOURCE_SELECTION, value).apply()
     }
 
     fun setUpgradeLengthSlackSeconds(value: Int) {
@@ -1989,6 +1997,7 @@ object AppSettings {
     private const val KEY_QUALITY_LEGACY = "audio_quality"
     private const val KEY_QUALITY_WIFI = "audio_quality_wifi"
     private const val KEY_QUALITY_CELLULAR = "audio_quality_cellular"
+    private const val KEY_AUTOMATIC_SOURCE_SELECTION = "automatic_source_selection"
     private const val KEY_UPGRADE_LENGTH_SLACK_SECONDS = "upgrade_length_slack_seconds"
     private const val KEY_QUALITY_DOWNLOAD = "audio_quality_download"
     private const val KEY_WIFI_ONLY_DOWNLOADS = "wifi_only_downloads"
@@ -2104,4 +2113,3 @@ object AppSettings {
     private const val KEY_DISCORD_INFO_DISMISSED = "discord_info_dismissed"
     private const val KEY_LAST_VERSION_CODE = "last_version_code"
 }
-

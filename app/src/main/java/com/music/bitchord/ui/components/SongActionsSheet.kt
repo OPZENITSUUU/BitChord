@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ThumbDownOffAlt
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -194,6 +195,8 @@ fun SongActionsSheet(
      * held row itself above them.
      */
     presentation: SongActionsPresentation = SongActionsPresentation.Sheet,
+    onHideFromHome: (() -> Unit)? = null,
+    hiddenFromHome: Boolean = false,
 ) {
     var pickingSleepTimer by remember { mutableStateOf(false) }
     val menu = presentation == SongActionsPresentation.Menu
@@ -296,6 +299,14 @@ fun SongActionsSheet(
 
         DownloadRow(song, palette, isOffline, onDownload)
         WebDavUploadRow(song, palette, isOffline, onUploadToWebDav)
+        if (!isOffline) onHideFromHome?.let { onToggle ->
+            ActionRow(
+                icon = Icons.Rounded.VisibilityOff,
+                label = stringResource(if (hiddenFromHome) R.string.show_on_home else R.string.hide_from_home),
+                accent = palette.accent,
+                onClick = onToggle,
+            )
+        }
         ActionRow(
             icon = Icons.Rounded.Radio,
             label = stringResource(R.string.start_radio),

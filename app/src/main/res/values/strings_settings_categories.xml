@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_category_account_title">Account &amp; connections</string>
+    <string name="settings_category_account_subtitle">Accounts, scrobbling and listening parties</string>
+    <string name="settings_category_audio_title">Audio &amp; playback</string>
+    <string name="settings_category_audio_subtitle">Sound quality, playback and audio output</string>
+    <string name="settings_category_downloads_title">Downloads</string>
+    <string name="settings_category_downloads_subtitle">Offline quality and download behavior</string>
+    <string name="settings_category_appearance_title">Appearance</string>
+    <string name="settings_category_appearance_subtitle">App icon, theme and player visuals</string>
+    <string name="settings_category_library_title">Library &amp; storage</string>
+    <string name="settings_category_library_subtitle">Local music, cached songs and space</string>
+    <string name="settings_category_data_title">Your data</string>
+    <string name="settings_category_data_subtitle">Listening history, export and restore</string>
+    <string name="settings_category_language_title">Language</string>
+    <string name="settings_category_language_subtitle">App language and lyrics translation</string>
+    <string name="settings_category_more_title">More settings</string>
+    <string name="settings_category_more_subtitle">Queue behavior and advanced options</string>
+    <string name="settings_made_by">Made by OPZENITSU69</string>
+    <string name="automatic_best_source_title">Automatic best source</string>
+    <string name="automatic_best_source_subtitle">Compare enabled sources and choose the best reported codec and bitrate for each song</string>
+    <string name="hide_from_home">Hide from Home</string>
+    <string name="show_on_home">Show on Home</string>
+    <string name="home_song_hidden_notice">Removed from Home</string>
+    <string name="home_song_shown_notice">Shown on Home</string>
+    <string name="duplicate_playlist_title">This song is already in a playlist</string>
+    <string name="duplicate_playlist_message">Already in: %1$s</string>
+    <string name="duplicate_playlist_skip">Skip duplicate</string>
+    <string name="duplicate_playlist_keep_both">Keep both</string>
+    <string name="duplicate_playlist_checking">Checking selected playlists for duplicates…</string>
+    <string name="duplicate_playlist_check_failed">Could not verify these playlists: %1$s. Please try again.</string>
+    <string name="export_listening_csv">Export listening history as CSV</string>
+    <string name="export_listening_csv_subtitle">Spreadsheet-friendly monthly listening totals</string>
+    <string name="csv_import_succeeded">Imported %1$s monthly records from CSV</string>
+    <string name="csv_export_succeeded">Exported %1$s monthly records to CSV</string>
+    <string name="import_listening_csv">Import listening history from CSV</string>
+    <string name="import_listening_csv_subtitle">Restore monthly listening totals from an OPZENITSU69 CSV export</string>
+    <string name="csv_import_warning">This replaces listening history on this device. Settings are not included in a CSV file.</string>
+    <string name="csv_choose_file">Choose CSV file</string>
+</resources>

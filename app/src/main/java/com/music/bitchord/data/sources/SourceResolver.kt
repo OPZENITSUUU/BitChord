@@ -167,6 +167,7 @@ object SourceResolver {
     ): SourceStream? {
         val request = requestForNow()
         val active = SourceRegistry.activeForPlayback()
+        val automaticBest = AppSettings.automaticSourceSelection.value
         // A pin identifies where the row originally came from; it does not
         // override the source switch. Looking the instance up directly used to
         // reopen disabled JioSaavn/addon tracks already sitting in the queue.
@@ -181,6 +182,32 @@ object SourceResolver {
         // expressible.
         // A row picked by hand is not up for substitution — see [MIX_PARAM].
         val picked = pickedMix != null && pinned is AddonSource
+        // Automatic mode is deliberately opt-in: it waits for all enabled
+        // matching sources and compares resolved StreamFormat values, rather
+        // than trusting a catalogue's quality label. Keep the pinned stream as
+        // a candidate and replace it only when actual reported quality is higher.
+        if (automaticBest && !picked) {
+            val pinnedStream = pinned?.let { source ->
+                attempt(source) { source.stream(trackId, request) }
+                    ?.copy(sourceConfigId = source.configId)
+            }
+            val bestAlternative = bestAcross(
+                sources = active.filterNot { it.configId == configId },
+                target = target,
+                request = request,
+                waitForAll = true,
+                strictLength = target.durationSec != null,
+                requireSharedArtist = true,
+            )
+            val alternateStream = bestAlternative?.second
+            if (alternateStream != null &&
+                (pinnedStream == null || isBetter(alternateStream.format, pinnedStream.format))
+            ) {
+                TrackLog.d(TAG, "automatic best source: '${target.title}' → ${alternateStream.format.summary}")
+                return alternateStream
+            }
+            if (pinnedStream != null) return pinnedStream
+        }
         if (!picked && request is StreamRequest.Lossless && pinned?.kind?.canServeLossless != true) {
             for (source in rankedAbove(configId, active)) {
                 if (!source.kind.canServeLossless) continue
@@ -220,7 +247,14 @@ object SourceResolver {
         val fallbacks = active.filterNot {
             it.configId == configId || (pickedMix != null && it.kind == SourceKind.YOUTUBE)
         }
-        val (fallbackSource, stream) = bestAcross(fallbacks, target, request) ?: return null
+        val (fallbackSource, stream) = bestAcross(
+            sources = fallbacks,
+            target = target,
+            request = request,
+            waitForAll = automaticBest,
+            strictLength = automaticBest && target.durationSec != null,
+            requireSharedArtist = automaticBest,
+        ) ?: return null
         TrackLog.d(TAG, "fallback: '${target.title}' served by ${fallbackSource.displayName}")
         return stream
     }
@@ -256,7 +290,17 @@ object SourceResolver {
         val active = SourceRegistry.activeForPlayback()
         val youtube = active.firstOrNull { it.kind == SourceKind.YOUTUBE } ?: return null
         val request = requestForNow()
-        val (source, stream) = bestAcross(rankedAbove(youtube.configId, active), target, request)
+        val automaticBest = AppSettings.automaticSourceSelection.value
+        val candidates = if (automaticBest) active.filterNot { it.kind == SourceKind.YOUTUBE }
+        else rankedAbove(youtube.configId, active)
+        val (source, stream) = bestAcross(
+            sources = candidates,
+            target = target,
+            request = request,
+            waitForAll = automaticBest,
+            strictLength = automaticBest && target.durationSec != null,
+            requireSharedArtist = automaticBest,
+        )
             ?: return null
         // Says what was found, not what the caller will do with it. This
         // line used to read "substituted" unconditionally, including for

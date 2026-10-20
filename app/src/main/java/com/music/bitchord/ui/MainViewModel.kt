@@ -26,6 +26,8 @@ import com.music.bitchord.data.lyrics.LyricLine
 import com.music.bitchord.data.lyrics.LyricsRepository
 import com.music.bitchord.data.lyrics.LyricsSource
 import com.music.bitchord.data.settings.AppSettings
+import com.music.bitchord.data.settings.HomeSongVisibility
+import com.music.bitchord.data.settings.withoutHiddenHomeSongs
 import com.music.bitchord.data.innertube.Innertube
 import com.music.bitchord.data.innertube.PlaybackTracker
 import com.music.bitchord.data.innertube.StreamResolver
@@ -111,7 +113,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
 
     private val _home = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
-    val home: StateFlow<UiState<List<HomeShelf>>> = _home.asStateFlow()
+    private val homeSongVisibility = HomeSongVisibility(app)
+    val hiddenHomeSongIds: StateFlow<Set<String>> = homeSongVisibility.hiddenVideoIds
+    val home: StateFlow<UiState<List<HomeShelf>>> = combine(_home, hiddenHomeSongIds) { state, hiddenIds ->
+        if (state is UiState.Success) {
+            UiState.Success(state.data.withoutHiddenHomeSongs(hiddenIds))
+        } else {
+            state
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, UiState.Loading)
 
     /**
      * Token for the next page of Home shelves; null once there's nothing
@@ -957,9 +967,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * out not to have taken is worse than one that shows it a moment late. The
      * playlist's own page is the exception — see [addOne].
      *
-     * YouTube itself has no objection to a duplicate row, so whether the track
-     * is already there is checked here, against the playlist's open page or a
-     * fresh fetch of it, and a real duplicate is never sent.
+     * YouTube itself has no objection to a duplicate row. The default path
+     * checks exact video IDs against the open page or a fresh fetch; an explicit
+     * Keep both choice can skip that guard.
      *
      * One at a time rather than all at once: each check reads the playlist it
      * is about, and a burst of parallel edits is exactly what YouTube answers
@@ -969,11 +979,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun addToPlaylists(
         playlists: List<UserPlaylist>,
         song: Song,
+        allowDuplicates: Boolean = false,
         onResult: (added: Int, alreadyThere: Int, failed: Int) -> Unit = { _, _, _ -> },
     ) {
         if (!requireSignIn() || playlists.isEmpty()) return
         viewModelScope.launch {
-            val outcomes = playlists.map { addOne(it, song) }
+            val outcomes = playlists.map { addOne(it, song, allowDuplicates) }
             onResult(
                 outcomes.count { it == AddOutcome.ADDED },
                 outcomes.count { it == AddOutcome.ALREADY_THERE },
@@ -982,14 +993,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Checks selected playlists by stable YouTube video ID, never by title or
+     * artist text. Playlists that cannot be fetched are reported separately so
+     * the UI can avoid adding blindly after a failed duplicate check.
+     */
+    fun findPlaylistDuplicates(
+        playlists: List<UserPlaylist>,
+        song: Song,
+        onResult: (duplicates: List<UserPlaylist>, unverifiable: List<UserPlaylist>) -> Unit,
+    ) {
+        if (playlists.isEmpty()) {
+            onResult(emptyList(), emptyList())
+            return
+        }
+        if (!requireSignIn()) {
+            onResult(emptyList(), playlists)
+            return
+        }
+        viewModelScope.launch {
+            val duplicates = mutableListOf<UserPlaylist>()
+            val unverifiable = mutableListOf<UserPlaylist>()
+            playlists.forEach { playlist ->
+                val openSongs = (_detailStack.value.firstOrNull { it.browseId == playlist.browseId }
+                    ?.songs as? UiState.Success)?.data
+                if (openSongs != null) {
+                    if (openSongs.any { it.videoId == song.videoId }) duplicates += playlist
+                } else {
+                    YtMusicRepository.allSongs(playlist.browseId).fold(
+                        onSuccess = { rows -> if (rows.any { it.videoId == song.videoId }) duplicates += playlist },
+                        onFailure = { unverifiable += playlist },
+                    )
+                }
+            }
+            onResult(duplicates, unverifiable)
+        }
+    }
+
     private enum class AddOutcome { ADDED, ALREADY_THERE, FAILED }
 
-    private suspend fun addOne(playlist: UserPlaylist, song: Song): AddOutcome {
+    private suspend fun addOne(playlist: UserPlaylist, song: Song, allowDuplicates: Boolean): AddOutcome {
         val openSongs = (_detailStack.value.firstOrNull { it.browseId == playlist.browseId }
             ?.songs as? UiState.Success)?.data
         val known = openSongs
             ?: YtMusicRepository.allSongs(playlist.browseId).getOrNull()
-        if (known?.any { it.videoId == song.videoId } == true) return AddOutcome.ALREADY_THERE
+        if (!allowDuplicates && known?.any { it.videoId == song.videoId } == true) {
+            return AddOutcome.ALREADY_THERE
+        }
         return YtMusicRepository.addToPlaylist(playlist.playlistId, listOf(song.videoId)).fold(
             onSuccess = { added ->
                 libraryStale = true
@@ -1627,6 +1677,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Tapping a tab should leave any pushed page behind. */
     fun clearDetail() {
         if (_detailStack.value.isNotEmpty()) _detailStack.value = emptyList()
+    }
+
+    /** Hides or restores a track only in Home recommendation shelves. */
+    fun setHomeSongHidden(videoId: String, hidden: Boolean) {
+        if (videoId.isBlank()) return
+        homeSongVisibility.setHidden(videoId, hidden)
     }
 
     fun loadHome() {

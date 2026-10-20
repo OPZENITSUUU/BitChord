@@ -417,6 +417,62 @@
             </intent-filter>
         </activity-alias>
 
+        <activity-alias
+            android:name=".LauncherCustomGreenDrip"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_custom_green_drip"
+            android:roundIcon="@mipmap/ic_custom_green_drip"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".LauncherCustomSpotifyPurple"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_custom_spotify_purple"
+            android:roundIcon="@mipmap/ic_custom_spotify_purple"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".LauncherCustomSpotifyChrome"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_custom_spotify_chrome"
+            android:roundIcon="@mipmap/ic_custom_spotify_chrome"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".LauncherCustomSpotifyGreen"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_custom_spotify_green"
+            android:roundIcon="@mipmap/ic_custom_spotify_green"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <service
             android:name=".playback.PlaybackService"
             android:exported="true"
