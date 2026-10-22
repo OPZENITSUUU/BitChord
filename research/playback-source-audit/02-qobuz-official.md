@@ -1,0 +1,18 @@
+# Qobuz official Android/API access audit
+
+**As of 2026-10-18.** Qobuz has a first-party Android app and a documented consumer streaming/download service, but the public evidence does not establish an officially open, self-service developer API that BitChord can use. The official API Terms require a Qobuz-issued Application ID and Application secret, require agreement to the terms, prohibit sharing those credentials, and authorize use only within Qobuz's API terms. The terms do not describe an open OAuth developer enrollment flow. No credentials were requested or used in this audit. [1]
+
+The public Qobuz Android listing documents lossless CD and Hi-Res playback/offline features for its own app. Qobuz Help also lists Android phones/tablets and Android TV. These statements describe Qobuz's own applications and service, not a BitChord integration or third-party SDK. [2] [3] The official terms say streaming requires an account/subscription, mobile listening requires Qobuz mobile applications, and imported offline music is for listening in Qobuz Applications; subscription and offline rights expire with the subscription. Authorized independent downloads are a distinct Qobuz offer subject to its terms, not permission to save protected stream media. [4]
+
+**BitChord compatibility:** its native addon protocol expects an HTTP service with JSON `/manifest.json`, `/search?q=...`, and `/stream/{id}` endpoints. Qobuz's partner API is a REST API with its own paths, parameters, signing/authentication and response shapes; it does not provide the required BitChord manifest/endpoints in public source. It is therefore **not a drop-in native addon**. A custom adapter would need authorized credentials and would still need to honor Qobuz terms. The QuickJS module path is a separate executable-JavaScript interface (`searchTracks` and `getTrackStreamUrl` exports after module index/code loading); no official Qobuz module/repository was found in the inspected Qobuz public evidence. Do not equate a third-party wrapper with official Qobuz approval. BitChord Android build declares minSdk 26 / targetSdk 36 and QuickJS for module execution (local source: `app/build.gradle.kts`); this says nothing about Qobuz API authorization.
+
+**What was and was not verified:** public pages and the official API terms were reachable and inspected; BitChord local protocol and build declarations were inspected read-only. No login, API call, OAuth exchange, credential submission, stream URL resolution, stream-media retrieval, playback, quality verification, or download was attempted. Stream authentication, source resolution, actual audio playback, true lossless/Hi-Res through BitChord, and authorized downloads through BitChord are **not verified**. A manifest or catalog/search metadata alone would not prove playable audio or quality. Exact blocker: the official terms require Qobuz-issued app ID/secret, and no such authorized credentials or official BitChord-compatible integration are publicly available in the inspected materials.
+
+## References
+
+[1]: https://static.qobuz.com/apps/api/QobuzAPI-TermsofUse.pdf "Qobuz API Terms of Use"
+[2]: https://play.google.com/store/apps/details?id=com.qobuz.music&hl=en_US "Qobuz Android app on Google Play"
+[3]: https://help.qobuz.com/en/articles/602448-how-to-listen-to-qobuz "Qobuz Help Center: How to listen to Qobuz"
+[4]: https://www.qobuz.com/us-en/legal/terms "Qobuz General Conditions of Use and Sale"
+[5]: https://github.com/api-evangelist/qobuz "Independent third-party Qobuz API profile"
+[6]: https://github.com/DJDoubleD/QobuzApiSharp "Third-party Qobuz API wrapper reference"

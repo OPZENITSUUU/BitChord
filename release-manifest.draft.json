@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "status": "draft-not-published",
+  "packageName": "com.music.bitchord",
+  "version": "1.8.1-beta1",
+  "versionCode": 28,
+  "minimumSupportedVersion": null,
+  "releaseNotes": [
+    "Added a personal build flavor with a configurable app name and original equalizer launcher/notification branding.",
+    "Added a tap-to-skip 3.2-second startup intro and persisted Now Playing speed presets.",
+    "Made Stats for Nerds distinguish source-reported claims from current Media3 renderer information; unknown values remain explicit.",
+    "Hardened native JSON addon transport and update downloads with HTTPS/host checks, SHA-256 validation, signing-identity checks, byte progress and resumable partial downloads.",
+    "Added missing Simplified and Traditional Chinese strings."
+  ],
+  "downloadUrl": null,
+  "sha256": "e89ddf7d9b45d1e6a7e1fb61e8628a43c3aa40c2644b3777b31943e02897e0ce",
+  "artifactFile": "app-personal-universal-debug.apk",
+  "artifactPath": "app/build/outputs/apk/personal/debug/app-personal-universal-debug.apk",
+  "buildType": "debug",
+  "publishedAt": null,
+  "migrationNotes": "No application-ID or database schema migration was made. The checked-out app ID remains com.music.bitchord. An in-place update requires a signing certificate compatible with the installed build; this local APK uses the Android debug certificate. No public release/download URL is available yet."
+}

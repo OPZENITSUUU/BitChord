@@ -109,17 +109,23 @@ object SourceRegistry {
 
         val stored = prefs.getString(KEY_SOURCES, null)?.let(::decodeStored) ?: emptyList()
         val jioOptInMigrationDone = prefs.getBoolean(KEY_JIOSAAVN_OPT_IN_V1, false)
-        val after = sourcesForInit(stored, forceJioSaavnOff = !jioOptInMigrationDone)
+        val defaultAddonsSeeded = prefs.getBoolean(KEY_DEFAULT_ADDONS_SEEDED_V1, false)
+        val after = sourcesForInit(
+            stored,
+            forceJioSaavnOff = !jioOptInMigrationDone,
+            seedDefaultAddons = !defaultAddonsSeeded,
+        )
 
         // Publish state and the migration marker in one preferences edit. If a
         // process dies after recording the marker but before recording the
         // disabled source, the next launch would otherwise believe the forced
         // opt-out had already happened and silently restore the old on state.
         publish(after, persist = false)
-        if (after != stored || !jioOptInMigrationDone) {
+        if (after != stored || !jioOptInMigrationDone || !defaultAddonsSeeded) {
             prefs.edit()
                 .putString(KEY_SOURCES, json.encodeToString(ListSerializer(SourceConfig.serializer()), after))
                 .putBoolean(KEY_JIOSAAVN_OPT_IN_V1, true)
+                .putBoolean(KEY_DEFAULT_ADDONS_SEEDED_V1, true)
                 .apply()
         }
     }
@@ -135,13 +141,24 @@ object SourceRegistry {
     internal fun sourcesForInit(
         stored: List<SourceConfig>,
         forceJioSaavnOff: Boolean,
+        seedDefaultAddons: Boolean = true,
     ): List<SourceConfig> {
         // Seeded rather than persisted-on-first-write, so a build adding a new
-        // built-in kind picks it up for existing installs too. SourceConfig's
-        // default is the policy: Commons/JioSaavn off, YouTube on.
-        val seeded = stored + BUILT_IN_KINDS
+        // built-in kind picks it up for existing installs too. Commons and
+        // JioSaavn remain opt-in; YouTube is on. User-requested add-ons are
+        // seeded once and then their stored on/off/removal choice is respected.
+        val withBuiltIns = stored + BUILT_IN_KINDS
             .filter { kind -> stored.none { it.kind == kind } }
             .map { SourceConfig(kind = it) }
+        val seeded = if (!seedDefaultAddons) {
+            withBuiltIns
+        } else {
+            withBuiltIns + DEFAULT_ADDONS.filter { candidate ->
+                withBuiltIns.none {
+                    it.kind == SourceKind.ADDON && canonicalUrl(it.baseUrl) == canonicalUrl(candidate.baseUrl)
+                }
+            }
+        }
 
         // The retired built-in module is removed, while a custom module entered
         // by the user is preserved.
@@ -503,9 +520,46 @@ object SourceRegistry {
 
     private val BUILT_IN_KINDS = listOf(SourceKind.WIKIMEDIA_COMMONS, SourceKind.JIOSAAVN, SourceKind.YOUTUBE)
 
+    /** Public endpoints requested by the user. Credential-bearing paths are never bundled in an APK. */
+    private val DEFAULT_ADDONS = listOf(
+        SourceConfig(
+            id = "default-addon-bluebit-v1",
+            kind = SourceKind.ADDON,
+            label = "BlueBit Station",
+            baseUrl = "https://bluebit.jucepe0929.workers.dev",
+            enabled = true,
+            allowDownloads = false,
+        ),
+        SourceConfig(
+            id = "default-addon-mono-v1",
+            kind = SourceKind.ADDON,
+            label = "Eljohnzc Mono",
+            baseUrl = "https://eljohnzc-mono.de.deplexo.com",
+            enabled = true,
+            allowDownloads = false,
+        ),
+        SourceConfig(
+            id = "default-addon-lossless-bridge-v1",
+            kind = SourceKind.ADDON,
+            label = "Lossless Bridge",
+            baseUrl = "https://losslessbridge.de.deplexo.com",
+            enabled = true,
+            allowDownloads = false,
+        ),
+        SourceConfig(
+            id = "default-addon-qobuz-dl-v1",
+            kind = SourceKind.ADDON,
+            label = "Qobuz-DL",
+            baseUrl = "https://qobuz-addon.vercel.app/a",
+            enabled = true,
+            allowDownloads = false,
+        ),
+    )
+
     private const val KEY_SOURCES = "sources"
     /** One-shot migration: existing users must explicitly opt in again. */
     private const val KEY_JIOSAAVN_OPT_IN_V1 = "jiosaavn_opt_in_v1"
+    private const val KEY_DEFAULT_ADDONS_SEEDED_V1 = "default_addons_seeded_v1"
     private const val PREFIX = "src:"
     private const val SEPARATOR = "::"
 }

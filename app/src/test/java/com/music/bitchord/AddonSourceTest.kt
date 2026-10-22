@@ -906,6 +906,54 @@ class AddonSourceTest {
         assertEquals(0, answers.size)
     }
 
+    @Test
+    fun `a rate-limited search probe honors Retry-After and retries`() = runBlocking {
+        route("/manifest.json", manifest())
+        val answers = ArrayDeque(
+            listOf(
+                MockResponse().setResponseCode(429).setHeader("Retry-After", "0"),
+                json("""{"tracks":[{"id":"t1","title":"Get Lucky","artist":"Daft Punk"}]}"""),
+            ),
+        )
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                synchronized(seen) { seen += request }
+                val path = request.requestUrl?.encodedPath.orEmpty()
+                if (path == "/search") return answers.removeFirst()
+                return routes[path] ?: MockResponse().setResponseCode(404)
+            }
+        }
+
+        val result = AddonClient(server.url("/").toString())
+            .search("Get Lucky", AddonClient.TIER_LOSSLESS)
+
+        assertEquals("t1", result.getOrThrow().single().id)
+        assertEquals(0, answers.size)
+        assertEquals(2, seen.count { it.requestUrl?.encodedPath == "/search" })
+    }
+
+    @Test
+    fun `search error surfaces upstream status while redacting URL and token`() = runBlocking {
+        route("/manifest.json", manifest())
+        route(
+            "/search",
+            MockResponse()
+                .setResponseCode(502)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":"TIDAL /generate HTTP 403; url=https://upstream.example/search?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDE"}"""),
+        )
+
+        val failure = AddonClient(server.url("/").toString())
+            .search("Get Lucky", AddonClient.TIER_LOSSLESS)
+            .exceptionOrNull()!!
+        val message = failure.message.orEmpty()
+
+        assertTrue(message.contains("HTTP 502"))
+        assertTrue(message.contains("TIDAL /generate HTTP 403"))
+        assertFalse(message.contains("upstream.example"))
+        assertFalse(message.contains("abcdefghijklmnopqrstuvwxyz"))
+    }
+
     // ── Fallback quality inference ────────────────────────────────────────
 
     /**

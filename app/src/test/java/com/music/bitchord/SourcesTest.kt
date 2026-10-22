@@ -620,6 +620,55 @@ class SourcesTest {
     }
 
     @Test
+    fun `requested public addon endpoints seed enabled once without bundling private token URLs`() {
+        val initial = SourceRegistry.sourcesForInit(emptyList(), forceJioSaavnOff = true)
+        val addons = initial.filter { it.kind == SourceKind.ADDON }
+
+        assertEquals(
+            setOf(
+                "https://bluebit.jucepe0929.workers.dev",
+                "https://eljohnzc-mono.de.deplexo.com",
+                "https://losslessbridge.de.deplexo.com",
+                "https://qobuz-addon.vercel.app/a",
+            ),
+            addons.map { it.baseUrl }.toSet(),
+        )
+        assertEquals(4, addons.size)
+        assertTrue(addons.all { it.enabled })
+        assertTrue(addons.all { !it.allowDownloads })
+        assertTrue(addons.none { it.baseUrl.contains("gAAAA") || it.baseUrl.contains("nebula") })
+
+        // After the one-time migration, a user toggle/removal is not undone.
+        val userChoice = initial.filterNot { it.baseUrl == "https://bluebit.jucepe0929.workers.dev" }
+            .map { if (it.kind == SourceKind.ADDON) it.copy(enabled = false) else it }
+        val nextLaunch = SourceRegistry.sourcesForInit(
+            userChoice,
+            forceJioSaavnOff = false,
+            seedDefaultAddons = false,
+        )
+        assertTrue(nextLaunch.none { it.baseUrl == "https://bluebit.jucepe0929.workers.dev" })
+        assertTrue(nextLaunch.filter { it.kind == SourceKind.ADDON }.all { !it.enabled })
+    }
+
+    @Test
+    fun `existing addon at a requested URL is not duplicated or force-enabled`() {
+        val existing = SourceConfig(
+            id = "user-choice",
+            kind = SourceKind.ADDON,
+            baseUrl = "https://eljohnzc-mono.de.deplexo.com",
+            enabled = false,
+        )
+
+        val initialized = SourceRegistry.sourcesForInit(listOf(existing), forceJioSaavnOff = false)
+
+        assertEquals(
+            1,
+            initialized.count { it.kind == SourceKind.ADDON && it.baseUrl.contains("eljohnzc-mono") },
+        )
+        assertFalse(initialized.single { it.id == "user-choice" }.enabled)
+    }
+
+    @Test
     fun `the opt-in migration disables JioSaavn once for existing installs`() {
         val previouslyEnabled = SourceConfig(kind = SourceKind.JIOSAAVN, enabled = true)
 

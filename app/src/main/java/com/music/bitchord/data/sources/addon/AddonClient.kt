@@ -13,6 +13,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -356,8 +359,8 @@ class AddonClient(rawBaseUrl: String) {
                     // The sources screen renders the two differently, and
                     // painting a transient outage as a configuration error
                     // sends people to re-paste a URL that was always correct.
-                    response.code >= 500 -> throw AddonUnavailable("HTTP ${response.code}")
-                    response.code != 429 -> throw AddonException("HTTP ${response.code}")
+                    response.code >= 500 -> throw AddonUnavailable(httpFailure(response))
+                    response.code != 429 -> throw AddonException(httpFailure(response))
                     attempt >= MAX_RETRIES -> throw AddonUnavailable("This addon is rate limiting BitChord")
                     else -> retryAfterMs(response.header("Retry-After"), attempt)
                 }
@@ -408,6 +411,26 @@ class AddonClient(rawBaseUrl: String) {
     private fun retryAfterMs(header: String?, attempt: Int): Long {
         val stated = header?.trim()?.toDoubleOrNull()?.times(1000)?.toLong()
         return (stated ?: (BACKOFF_BASE_MS shl attempt)).coerceIn(BACKOFF_BASE_MS, BACKOFF_CAP_MS)
+    }
+
+    /**
+     * Keeps an addon's useful JSON error reason (for example an upstream 403
+     * inside its 502) in diagnostics, without copying credentials or signed
+     * URLs into TrackLog.
+     */
+    private fun httpFailure(response: Response): String {
+        val detail = runCatching {
+            val payload = json.parseToJsonElement(response.peekBody(MAX_ERROR_BODY_BYTES).string()) as? JsonObject
+            payload?.get("error")?.jsonPrimitive?.contentOrNull
+        }.getOrNull()
+            ?.replace(Regex("https?://[^\\s\\\"']+"), "[URL redacted]")
+            ?.replace(Regex("(?i)(token|secret|authorization|api[_-]?key)(\\s*[:=]\\s*)[^\\s,;\\\"]+"), "$1$2[redacted]")
+            ?.replace(Regex("\\b[A-Za-z0-9_-]{40,}\\b"), "[opaque value redacted]")
+            ?.replace(Regex("[\\r\\n\\t]+"), " ")
+            ?.trim()
+            ?.take(MAX_ERROR_DETAIL_CHARS)
+            ?.takeIf { it.isNotBlank() }
+        return detail?.let { "HTTP ${response.code}: $it" } ?: "HTTP ${response.code}"
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -465,6 +488,8 @@ class AddonClient(rawBaseUrl: String) {
 
         private const val MANIFEST_SUFFIX = "/manifest.json"
         const val MAX_JSON_RESPONSE_BYTES = 1_048_576
+        private const val MAX_ERROR_BODY_BYTES = 4_096L
+        private const val MAX_ERROR_DETAIL_CHARS = 200
 
         /**
          * A base URL from whatever the user pasted.
