@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "draft-not-published",
-  "packageName": "com.music.bitchord",
+  "packageName": "com.voidmusic.player",
   "version": "1.8.1-beta1",
   "versionCode": 28,
   "minimumSupportedVersion": null,
@@ -13,10 +13,10 @@
     "Added missing Simplified and Traditional Chinese strings."
   ],
   "downloadUrl": null,
-  "sha256": "e89ddf7d9b45d1e6a7e1fb61e8628a43c3aa40c2644b3777b31943e02897e0ce",
-  "artifactFile": "app-personal-universal-debug.apk",
-  "artifactPath": "app/build/outputs/apk/personal/debug/app-personal-universal-debug.apk",
+  "sha256": "e1ca3ce495cafd449c467d3eac418f5d4cac78a4f28784b14226ddf62b09a0dd",
+  "artifactFile": "Void Music.apk",
+  "artifactPath": "Void Music.apk",
   "buildType": "debug",
   "publishedAt": null,
-  "migrationNotes": "No application-ID or database schema migration was made. The checked-out app ID remains com.music.bitchord. An in-place update requires a signing certificate compatible with the installed build; this local APK uses the Android debug certificate. No public release/download URL is available yet."
+  "migrationNotes": "The Android application ID changed to com.voidmusic.player. Android treats this as a separate app; data does not automatically migrate from com.music.bitchord. This APK uses the Android debug certificate; in-place update compatibility with other builds has not been verified."
 }
