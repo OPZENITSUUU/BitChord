@@ -343,6 +343,7 @@ import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.Locale
 
 /** A full first screen of a native YouTube Music radio before AutoPlay tops it up. */
@@ -364,6 +365,9 @@ internal fun shouldSkipAfterDislike(
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent?.action == ACTION_OPEN_UPDATE_FROM_NOTIFICATION) {
+            updateNotificationTapped.value = true
+        }
         enableEdgeToEdge()
         // Before the composition, so a cold launch from a widget's artwork has
         // the request already standing by the time BitChordApp first reads it.
@@ -488,9 +492,17 @@ class MainActivity : AppCompatActivity() {
         // Replaces what getIntent() returns, so the extra this consumes is the
         // one that just arrived and not the one the task was started with.
         setIntent(intent)
+        if (intent.action == ACTION_OPEN_UPDATE_FROM_NOTIFICATION) {
+            updateNotificationTapped.value = true
+        }
         PlayerDeepLink.consume(intent)
         JamInviteLink.consume(intent)
         MusicLink.consume(intent)
+    }
+
+    companion object {
+        const val ACTION_OPEN_UPDATE_FROM_NOTIFICATION = "com.voidmusic.player.action.OPEN_UPDATE"
+        internal val updateNotificationTapped = MutableStateFlow(false)
     }
 }
 
@@ -759,6 +771,7 @@ private fun BitChordApp(
     var updateDialogShown by rememberSaveable { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
+    val updateNotificationTapped by MainActivity.updateNotificationTapped.collectAsStateWithLifecycle()
     val installerResultLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -787,6 +800,13 @@ private fun BitChordApp(
         if (updateNotice != null && !updateDialogShown) {
             updateDialogShown = true
             showUpdateDialog = true
+        }
+    }
+    LaunchedEffect(updateNotificationTapped, updateNotice) {
+        if (updateNotificationTapped && updateNotice != null) {
+            updateDialogShown = true
+            showUpdateDialog = true
+            MainActivity.updateNotificationTapped.value = false
         }
     }
     val query by viewModel.query.collectAsStateWithLifecycle()
@@ -2944,6 +2964,14 @@ private fun BitChordApp(
                             },
                             availableUpdateVersion = updateAvailable?.version,
                             onCheckForUpdates = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                    ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.POST_NOTIFICATIONS,
+                                    ) != PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
                                 scope.launch {
                                     when (AppUpdateChecker.check(context, force = true, ignoreDismissed = true)) {
                                         AppUpdateChecker.CheckResult.UPDATE_AVAILABLE -> showUpdateDialog = true

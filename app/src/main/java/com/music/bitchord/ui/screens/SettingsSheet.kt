@@ -1308,7 +1308,7 @@ fun SettingsScreen(
         }
 
         SearchableSettingsGroup(search, category = SettingsCategory.MORE) {
-            row(updateRowTitle, "update", "latest version", "github", "upgrade") {
+            row(updateRowTitle, "software update", "check for updates", "background update", "latest version", "github", "upgrade") {
                 SettingsRow(
                     icon = Icons.Rounded.Download,
                     title = updateRowTitle,

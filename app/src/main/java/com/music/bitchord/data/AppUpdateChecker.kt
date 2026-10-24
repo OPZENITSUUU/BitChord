@@ -52,6 +52,11 @@ object AppUpdateChecker {
     private const val UPDATE_PREFS = "bitchord_update_state"
     private const val KEY_DISMISSED_VERSION = "dismissed_release_version"
     private const val KEY_LAST_CHECK_MS = "last_github_release_check_ms"
+    private const val KEY_PENDING_VERSION = "pending_update_version"
+    private const val KEY_PENDING_RELEASE_URL = "pending_update_release_url"
+    private const val KEY_PENDING_APK_URL = "pending_update_apk_url"
+    private const val KEY_PENDING_APK_SHA256 = "pending_update_apk_sha256"
+    private const val KEY_PENDING_NOTES = "pending_update_notes"
     internal const val CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
 
     private const val LATEST_RELEASE_URL =
@@ -86,14 +91,14 @@ object AppUpdateChecker {
         force: Boolean = false,
         ignoreDismissed: Boolean = false,
     ): CheckResult = withContext(Dispatchers.IO) {
-        _available.value = null
+        restorePending(context)
         val prefs = context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         val lastCheck = prefs.getLong(KEY_LAST_CHECK_MS, 0L)
         if (!force && !shouldCheckNow(lastCheck, now)) return@withContext CheckResult.THROTTLED
         val dismissedVersion = prefs
             .getString(KEY_DISMISSED_VERSION, null)
-        runCatching {
+        val result = runCatching {
             val request = Request.Builder().url(LATEST_RELEASE_URL).build()
             val body = Http.client.newCall(request).execute().use { response ->
                 check(response.isSuccessful) { "GitHub update check failed: HTTP ${response.code}" }
@@ -117,10 +122,51 @@ object AppUpdateChecker {
             } else if (!ignoreDismissed && latest == dismissedVersion) {
                 CheckResult.UP_TO_DATE
             } else {
-                _available.value = UpdateInfo(latest, url, apk.url, apk.sha256, notes)
+                UpdateInfo(latest, url, apk.url, apk.sha256, notes).also {
+                    persistPending(context, it)
+                    _available.value = it
+                }
                 CheckResult.UPDATE_AVAILABLE
             }
         }.getOrElse { CheckResult.FAILED }
+        when (result) {
+            CheckResult.UP_TO_DATE, CheckResult.NO_COMPATIBLE_APK -> clearPending(context)
+            else -> Unit
+        }
+        result
+    }
+
+    /** Restore a previously verified release discovered by the periodic worker. */
+    fun restorePending(context: Context): UpdateInfo? {
+        val prefs = context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE)
+        val version = prefs.getString(KEY_PENDING_VERSION, null) ?: run { _available.value = null; return null }
+        val releaseUrl = prefs.getString(KEY_PENDING_RELEASE_URL, null) ?: run { _available.value = null; return null }
+        val apkUrl = prefs.getString(KEY_PENDING_APK_URL, null) ?: run { _available.value = null; return null }
+        val digest = prefs.getString(KEY_PENDING_APK_SHA256, null) ?: run { _available.value = null; return null }
+        val update = UpdateInfo(version, releaseUrl, apkUrl, digest, prefs.getString(KEY_PENDING_NOTES, null))
+        _available.value = update
+        return update
+    }
+
+    private fun persistPending(context: Context, update: UpdateInfo) {
+        context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_PENDING_VERSION, update.version)
+            .putString(KEY_PENDING_RELEASE_URL, update.releaseUrl)
+            .putString(KEY_PENDING_APK_URL, update.apkUrl)
+            .putString(KEY_PENDING_APK_SHA256, update.apkSha256)
+            .putString(KEY_PENDING_NOTES, update.notes)
+            .apply()
+    }
+
+    private fun clearPending(context: Context) {
+        context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_PENDING_VERSION)
+            .remove(KEY_PENDING_RELEASE_URL)
+            .remove(KEY_PENDING_APK_URL)
+            .remove(KEY_PENDING_APK_SHA256)
+            .remove(KEY_PENDING_NOTES)
+            .apply()
+        _available.value = null
     }
 
     fun dismiss(context: Context, version: String) {
@@ -128,7 +174,7 @@ object AppUpdateChecker {
             .edit()
             .putString(KEY_DISMISSED_VERSION, version)
             .apply()
-        _available.value = null
+        clearPending(context)
     }
 
     /**

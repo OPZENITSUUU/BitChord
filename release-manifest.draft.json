@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "status": "published",
   "packageName": "com.voidmusic.player",
-  "version": "1.8.1-beta6",
-  "versionCode": 30,
+  "version": "1.8.1-beta7",
+  "versionCode": 31,
   "minimumSupportedVersion": null,
   "releaseNotes": [
     "Added a personal build flavor with a configurable app name and original equalizer launcher/notification branding.",
@@ -11,13 +11,14 @@
     "Made Stats for Nerds distinguish source-reported claims from current Media3 renderer information; unknown values remain explicit.",
     "Added GitHub-based in-app updates with bounded checks, version comparison, verified Void Music APK selection, SHA-256/signing checks, download progress and installer-result verification.",
     "Added a Software Update option in Settings to manually check GitHub, show the installed/available versions, and open the update download/install flow.",
+    "Added persistent WorkManager-based background update checks and one notification per verified release; tapping opens the in-app update dialog, with no automatic APK download or install.",
     "Added missing Simplified and Traditional Chinese strings."
   ],
-  "downloadUrl": "https://github.com/OPZENITSUUU/BitChord/releases/download/v1.8.1-beta6/Void.Music.apk",
-  "sha256": "ce016f37004e0bf07689a8d6e9021c3932f926f853bf684d28619c63cb9407c6",
+  "downloadUrl": "https://github.com/OPZENITSUUU/BitChord/releases/download/v1.8.1-beta7/Void.Music.apk",
+  "sha256": "262170c0dd58423b47267c29321565dab56e77cce47193836a50ecad5b4e19e7",
   "artifactFile": "Void.Music.apk",
   "artifactPath": "Void.Music.apk",
   "buildType": "debug",
-  "publishedAt": "2026-10-24T11:15:52Z",
+  "publishedAt": null,
   "migrationNotes": "The Android application ID is com.voidmusic.player. This beta update preserves data only when installed over a matching package and signing certificate. This APK uses the Android debug certificate; update compatibility with builds signed by other keys is not supported."
 }
