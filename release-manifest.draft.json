@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "draft-not-published",
+  "status": "published",
   "packageName": "com.voidmusic.player",
   "version": "1.8.1-beta5",
   "versionCode": 29,
@@ -12,11 +12,11 @@
     "Added GitHub-based in-app updates with bounded checks, version comparison, verified Void Music APK selection, SHA-256/signing checks, download progress and installer-result verification.",
     "Added missing Simplified and Traditional Chinese strings."
   ],
-  "downloadUrl": null,
+  "downloadUrl": "https://github.com/OPZENITSUUU/BitChord/releases/download/v1.8.1-beta5/Void.Music.apk",
   "sha256": "784893f153ce35e8377093f0039aabae939dc33787840c7ce0cd78a3f0aea83c",
   "artifactFile": "Void Music.apk",
   "artifactPath": "Void Music.apk",
   "buildType": "debug",
-  "publishedAt": null,
+  "publishedAt": "2026-10-24T10:50:45Z",
   "migrationNotes": "The Android application ID is com.voidmusic.player. This beta update preserves data only when installed over a matching package and signing certificate. This APK uses the Android debug certificate; update compatibility with builds signed by other keys is not supported."
 }
