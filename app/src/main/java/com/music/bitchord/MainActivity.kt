@@ -2942,6 +2942,31 @@ private fun BitChordApp(
                                 settingsSubScreen = "sources"
                                 showSources = true
                             },
+                            availableUpdateVersion = updateAvailable?.version,
+                            onCheckForUpdates = {
+                                scope.launch {
+                                    when (AppUpdateChecker.check(context, force = true, ignoreDismissed = true)) {
+                                        AppUpdateChecker.CheckResult.UPDATE_AVAILABLE -> showUpdateDialog = true
+                                        AppUpdateChecker.CheckResult.UP_TO_DATE -> Toast.makeText(
+                                            context,
+                                            context.getString(R.string.settings_update_current, BuildConfig.VERSION_NAME),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                        AppUpdateChecker.CheckResult.NO_COMPATIBLE_APK -> Toast.makeText(
+                                            context,
+                                            R.string.settings_update_no_apk,
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                        AppUpdateChecker.CheckResult.FAILED -> Toast.makeText(
+                                            context,
+                                            R.string.settings_update_check_failed,
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                        AppUpdateChecker.CheckResult.THROTTLED -> Unit
+                                    }
+                                }
+                            },
+                            onOpenUpdate = { showUpdateDialog = true },
                             onListenTogether = {
                                 settingsSubScreen = "listen_together"
                                 showListenTogether = true

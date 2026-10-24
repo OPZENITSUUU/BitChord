@@ -46,6 +46,8 @@ object AppUpdateChecker {
         val notes: String?,
     )
 
+    enum class CheckResult { UPDATE_AVAILABLE, UP_TO_DATE, NO_COMPATIBLE_APK, FAILED, THROTTLED }
+
     private const val CACHE_SUBDIR = "updates"
     private const val UPDATE_PREFS = "bitchord_update_state"
     private const val KEY_DISMISSED_VERSION = "dismissed_release_version"
@@ -79,31 +81,46 @@ object AppUpdateChecker {
     @Volatile
     private var downloadCancelled = false
 
-    suspend fun check(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun check(
+        context: Context,
+        force: Boolean = false,
+        ignoreDismissed: Boolean = false,
+    ): CheckResult = withContext(Dispatchers.IO) {
         _available.value = null
         val prefs = context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         val lastCheck = prefs.getLong(KEY_LAST_CHECK_MS, 0L)
-        if (!shouldCheckNow(lastCheck, now)) return@withContext
+        if (!force && !shouldCheckNow(lastCheck, now)) return@withContext CheckResult.THROTTLED
         val dismissedVersion = prefs
             .getString(KEY_DISMISSED_VERSION, null)
         runCatching {
             val request = Request.Builder().url(LATEST_RELEASE_URL).build()
             val body = Http.client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) null else response.body?.string()
-            } ?: return@runCatching
-            val release = json.parseToJsonElement(body) as? JsonObject ?: return@runCatching
-            val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
-            val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
-            if (!isPersonalReleaseUrl(url)) return@runCatching
+                check(response.isSuccessful) { "GitHub update check failed: HTTP ${response.code}" }
+                response.body?.string() ?: error("GitHub returned an empty release response")
+            }
+            val release = json.parseToJsonElement(body) as? JsonObject
+                ?: error("GitHub returned an invalid release response")
+            val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull
+                ?: error("GitHub release has no tag")
+            val url = release["html_url"]?.jsonPrimitive?.contentOrNull
+                ?: error("GitHub release has no page URL")
+            check(isPersonalReleaseUrl(url)) { "GitHub release URL is not from the configured repository" }
             prefs.edit().putLong(KEY_LAST_CHECK_MS, now).apply()
             val apk = verifiedApkAsset(release)
             val notes = release["body"]?.jsonPrimitive?.contentOrNull
             val latest = tag.removePrefix("v")
-            if (apk != null && shouldNotifyUpdate(latest, BuildConfig.VERSION_NAME, dismissedVersion)) {
+            if (!isNewer(latest, BuildConfig.VERSION_NAME)) {
+                CheckResult.UP_TO_DATE
+            } else if (apk == null) {
+                CheckResult.NO_COMPATIBLE_APK
+            } else if (!ignoreDismissed && latest == dismissedVersion) {
+                CheckResult.UP_TO_DATE
+            } else {
                 _available.value = UpdateInfo(latest, url, apk.url, apk.sha256, notes)
+                CheckResult.UPDATE_AVAILABLE
             }
-        }
+        }.getOrElse { CheckResult.FAILED }
     }
 
     fun dismiss(context: Context, version: String) {

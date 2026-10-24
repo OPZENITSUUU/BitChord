@@ -186,6 +186,9 @@ fun SettingsScreen(
     onLyricsSources: () -> Unit,
     onTranslationLanguage: () -> Unit,
     onSources: () -> Unit,
+    availableUpdateVersion: String?,
+    onCheckForUpdates: () -> Unit,
+    onOpenUpdate: () -> Unit,
     onListenTogether: () -> Unit,
     onWearOs: () -> Unit,
     onSpotifyCanvasAuth: () -> Unit,
@@ -395,6 +398,7 @@ fun SettingsScreen(
     // that answered to the query, and that tally has to start from zero each
     // time the query changes.
     val search = SettingsSearch(searchQuery, selectedCategory)
+    val updateRowTitle = stringResource(R.string.software_update)
 
     // What is left after a keystroke is a different list, and the offset the
     // last one was scrolled to means nothing in it.
@@ -1299,6 +1303,19 @@ fun SettingsScreen(
                         loader.diskCache?.clear()
                         Toast.makeText(context, context.getString(R.string.image_cache_cleared), Toast.LENGTH_SHORT).show()
                     },
+                )
+            }
+        }
+
+        SearchableSettingsGroup(search, category = SettingsCategory.MORE) {
+            row(updateRowTitle, "update", "latest version", "github", "upgrade") {
+                SettingsRow(
+                    icon = Icons.Rounded.Download,
+                    title = updateRowTitle,
+                    subtitle = availableUpdateVersion?.let {
+                        stringResource(R.string.settings_update_available, version, it)
+                    } ?: stringResource(R.string.settings_update_check_subtitle, version),
+                    onClick = if (availableUpdateVersion == null) onCheckForUpdates else onOpenUpdate,
                 )
             }
         }
