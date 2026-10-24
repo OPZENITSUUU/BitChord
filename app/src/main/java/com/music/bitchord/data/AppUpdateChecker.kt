@@ -49,6 +49,8 @@ object AppUpdateChecker {
     private const val CACHE_SUBDIR = "updates"
     private const val UPDATE_PREFS = "bitchord_update_state"
     private const val KEY_DISMISSED_VERSION = "dismissed_release_version"
+    private const val KEY_LAST_CHECK_MS = "last_github_release_check_ms"
+    internal const val CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
 
     private const val LATEST_RELEASE_URL =
         "https://api.github.com/repos/OPZENITSUUU/BitChord/releases/latest"
@@ -79,7 +81,11 @@ object AppUpdateChecker {
 
     suspend fun check(context: Context) = withContext(Dispatchers.IO) {
         _available.value = null
-        val dismissedVersion = context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(UPDATE_PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val lastCheck = prefs.getLong(KEY_LAST_CHECK_MS, 0L)
+        if (!shouldCheckNow(lastCheck, now)) return@withContext
+        val dismissedVersion = prefs
             .getString(KEY_DISMISSED_VERSION, null)
         runCatching {
             val request = Request.Builder().url(LATEST_RELEASE_URL).build()
@@ -90,11 +96,12 @@ object AppUpdateChecker {
             val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
             val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
             if (!isPersonalReleaseUrl(url)) return@runCatching
+            prefs.edit().putLong(KEY_LAST_CHECK_MS, now).apply()
             val apk = verifiedApkAsset(release)
             val notes = release["body"]?.jsonPrimitive?.contentOrNull
             val latest = tag.removePrefix("v")
-            if (shouldNotifyUpdate(latest, BuildConfig.VERSION_NAME, dismissedVersion)) {
-                _available.value = UpdateInfo(latest, url, apk?.url, apk?.sha256, notes)
+            if (apk != null && shouldNotifyUpdate(latest, BuildConfig.VERSION_NAME, dismissedVersion)) {
+                _available.value = UpdateInfo(latest, url, apk.url, apk.sha256, notes)
             }
         }
     }
@@ -143,6 +150,9 @@ object AppUpdateChecker {
 
     internal fun shouldNotifyUpdate(latest: String, current: String, dismissed: String?): Boolean =
         latest != dismissed && isNewer(latest, current)
+
+    internal fun shouldCheckNow(lastCheckMs: Long, nowMs: Long): Boolean =
+        lastCheckMs <= 0L || nowMs - lastCheckMs >= CHECK_INTERVAL_MS
 
     private fun isPersonalReleaseUrl(value: String): Boolean {
         val url = value.toHttpUrlOrNull() ?: return false
@@ -372,7 +382,7 @@ object AppUpdateChecker {
      * Some TV builds have no such settings screen; there the installer is
      * launched anyway and shows its own "not allowed" prompt with a way in.
      */
-    fun installApk(context: Context, file: File) {
+    fun installerIntent(context: Context, file: File): Intent? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !context.packageManager.canRequestPackageInstalls()
         ) {
@@ -383,37 +393,63 @@ object AppUpdateChecker {
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
             }.isSuccess
-            if (opened) return
+            if (opened) return null
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        context.startActivity(
-            Intent(Intent.ACTION_INSTALL_PACKAGE)
-                .setDataAndType(uri, "application/vnd.android.package-archive")
-                .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
-                .putExtra(Intent.EXTRA_RETURN_RESULT, true)
-                .addFlags(
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_ACTIVITY_NEW_TASK,
-                ),
-        )
+        return Intent(Intent.ACTION_INSTALL_PACKAGE)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+            .putExtra(Intent.EXTRA_RETURN_RESULT, true)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
-    /** A version split into its numeric dotted parts and whether it carries a "-suffix" (e.g. "-beta2"). */
-    private data class ParsedVersion(val parts: List<Int>, val isPreRelease: Boolean)
+    /** True only when Android reports the installed app is the exact downloaded package version. */
+    fun installedVersionMatches(context: Context, file: File): Boolean = runCatching {
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES else 0
+        val candidate = context.packageManager.getPackageArchiveInfo(file.absolutePath, flags) ?: return false
+        if (candidate.packageName != context.packageName) return false
+        val installed = context.packageManager.getPackageInfo(context.packageName, flags)
+        val installedCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) installed.longVersionCode else {
+            @Suppress("DEPRECATION")
+            installed.versionCode.toLong()
+        }
+        val candidateCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) candidate.longVersionCode else {
+            @Suppress("DEPRECATION")
+            candidate.versionCode.toLong()
+        }
+        installedCode == candidateCode
+    }.getOrDefault(false)
+
+    fun openInstallPermissionSettings(context: Context): Boolean = runCatching {
+        context.startActivity(
+            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                .setData(Uri.parse("package:${context.packageName}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        true
+    }.getOrDefault(false)
+
+    fun canInstallPackages(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+
+    /** A numeric dotted version plus optional prerelease identifiers. */
+    private data class ParsedVersion(val parts: List<Int>, val preRelease: List<String>?)
 
     private fun parseVersion(raw: String): ParsedVersion {
         val dash = raw.indexOf('-')
         val base = if (dash >= 0) raw.substring(0, dash) else raw
-        return ParsedVersion(base.split(".").map { it.toIntOrNull() ?: 0 }, dash >= 0)
+        val preRelease = if (dash >= 0) {
+            raw.substring(dash + 1)
+                .split(Regex("[.-]"))
+                .flatMap { part -> Regex("[0-9]+|[A-Za-z]+|[^A-Za-z0-9]+").findAll(part).map { it.value }.toList() }
+                .filter { it.isNotEmpty() }
+        } else null
+        return ParsedVersion(base.split(".").map { it.toIntOrNull() ?: 0 }, preRelease)
     }
 
     /**
-     * Numeric, dot-separated comparison — "1.10" outranks "1.9" — with one
-     * extra rule: a "-betaN" build (see the debug build type's
-     * `versionNameSuffix` in app/build.gradle.kts) is treated as older than a
-     * plain release of the same numbers, since the beta by definition predates
-     * the tag it was testing toward. Without this, a beta and the release it
-     * matches compare equal and testers never get nudged onto the real build.
+     * Numeric dotted comparison with semantic prerelease ordering. For example,
+     * beta4 is newer than beta1 but still older than the stable 1.8.1 release.
      */
     private fun isNewer(latest: String, current: String): Boolean {
         val l = parseVersion(latest)
@@ -423,6 +459,22 @@ object AppUpdateChecker {
             val b = c.parts.getOrElse(i) { 0 }
             if (a != b) return a > b
         }
-        return c.isPreRelease && !l.isPreRelease
+        if (l.preRelease == null) return c.preRelease != null
+        if (c.preRelease == null) return false
+        val count = minOf(l.preRelease.size, c.preRelease.size)
+        for (i in 0 until count) {
+            val a = l.preRelease[i]
+            val b = c.preRelease[i]
+            if (a == b) continue
+            val an = a.toLongOrNull()
+            val bn = b.toLongOrNull()
+            return when {
+                an != null && bn != null -> an > bn
+                an != null -> false
+                bn != null -> true
+                else -> a.compareTo(b, ignoreCase = true) > 0
+            }
+        }
+        return l.preRelease.size > c.preRelease.size
     }
 }

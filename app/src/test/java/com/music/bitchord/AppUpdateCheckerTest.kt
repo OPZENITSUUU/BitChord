@@ -30,13 +30,13 @@ class AppUpdateCheckerTest {
 
     @Test
     fun `universal personal release APK is selected with normalized digest`() {
-        val split = asset(name = "BitChord-v2_arm64-v8a.apk")
-        val universal = asset(name = "BitChord-v2.apk", digestValue = "sha256:$digest")
+        val split = asset(name = "Void.Music_arm64-v8a.apk")
+        val universal = asset(name = "Void.Music.apk", digestValue = "sha256:$digest")
 
         val selected = AppUpdateChecker.verifiedApkAsset(release(split, universal))
 
-        assertEquals("BitChord-v2", selected?.name)
-        assertEquals("https://github.com/OPZENITSUUU/BitChord/releases/download/v2/BitChord-v2.apk", selected?.url)
+        assertEquals("Void.Music", selected?.name)
+        assertEquals("https://github.com/OPZENITSUUU/BitChord/releases/download/v2/Void.Music.apk", selected?.url)
         assertEquals(digest, selected?.sha256)
     }
 
@@ -51,6 +51,21 @@ class AppUpdateCheckerTest {
         assertFalse(AppUpdateChecker.shouldNotifyUpdate("1.9.0", "1.8.1", "1.9.0"))
         assertTrue(AppUpdateChecker.shouldNotifyUpdate("1.9.0", "1.8.1", null))
         assertFalse(AppUpdateChecker.shouldNotifyUpdate("1.8.0", "1.8.1", null))
+    }
+
+    @Test
+    fun `newer beta tags compare by prerelease sequence`() {
+        assertTrue(AppUpdateChecker.shouldNotifyUpdate("1.8.1-beta4", "1.8.1-beta1", null))
+        assertTrue(AppUpdateChecker.shouldNotifyUpdate("1.8.1-beta10", "1.8.1-beta9", null))
+        assertFalse(AppUpdateChecker.shouldNotifyUpdate("1.8.1-beta2", "1.8.1-beta4", null))
+        assertTrue(AppUpdateChecker.shouldNotifyUpdate("1.8.1", "1.8.1-beta4", null))
+    }
+
+    @Test
+    fun `release checks are throttled to once per day`() {
+        assertTrue(AppUpdateChecker.shouldCheckNow(0L, 100L))
+        assertFalse(AppUpdateChecker.shouldCheckNow(10_000L, 10_000L + AppUpdateChecker.CHECK_INTERVAL_MS - 1))
+        assertTrue(AppUpdateChecker.shouldCheckNow(10_000L, 10_000L + AppUpdateChecker.CHECK_INTERVAL_MS))
     }
 
     @Test
@@ -98,7 +113,7 @@ class AppUpdateCheckerTest {
     }
 
     private fun asset(
-        name: String = "BitChord-v2.apk",
+        name: String = "Void.Music.apk",
         url: String = "https://github.com/OPZENITSUUU/BitChord/releases/download/v2/$name",
         digestValue: String? = "sha256:$digest",
     ): String {

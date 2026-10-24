@@ -759,6 +759,22 @@ private fun BitChordApp(
     var updateDialogShown by rememberSaveable { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
+    val installerResultLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val ready = AppUpdateChecker.download.value as? AppUpdateChecker.DownloadState.Ready
+        if (ready != null && AppUpdateChecker.installedVersionMatches(context, ready.file)) {
+            Toast.makeText(context, "Update installed. Reopen Void Music to use it.", Toast.LENGTH_LONG).show()
+            showUpdateDialog = false
+        } else {
+            val message = if (result.resultCode == android.app.Activity.RESULT_CANCELED) {
+                "Installation was cancelled. Your current version is still installed."
+            } else {
+                "Android did not confirm the update. Your current version remains installed."
+            }
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        }
+    }
 
     /**
      * The single gate both surfaces read, so the icon can't announce the update
@@ -5171,8 +5187,8 @@ private fun BitChordApp(
                         if (update.apkUrl != null) {
                             scope.launch { AppUpdateChecker.downloadApk(context) }
                         } else {
+                            Toast.makeText(context, "No compatible verified APK is attached to this release.", Toast.LENGTH_LONG).show()
                             AppUpdateChecker.dismiss(context, update.version)
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)))
                             showUpdateDialog = false
                         }
                     },
@@ -5181,13 +5197,19 @@ private fun BitChordApp(
                     },
                     onInstall = {
                         val ready = AppUpdateChecker.download.value as? AppUpdateChecker.DownloadState.Ready
-                        ready?.let { AppUpdateChecker.installApk(context, it.file) }
-                    },
-                    onOpenReleasePage = {
-                        AppUpdateChecker.resetDownload()
-                        AppUpdateChecker.dismiss(context, update.version)
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)))
-                        showUpdateDialog = false
+                        ready?.let {
+                            if (!AppUpdateChecker.canInstallPackages(context)) {
+                                if (AppUpdateChecker.openInstallPermissionSettings(context)) {
+                                    Toast.makeText(
+                                        context,
+                                        "Allow Void Music to install updates, then return and tap Install Now.",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            } else {
+                                AppUpdateChecker.installerIntent(context, it.file)?.let(installerResultLauncher::launch)
+                            }
+                        }
                     },
                 )
             }

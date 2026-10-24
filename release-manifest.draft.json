@@ -2,21 +2,21 @@
   "schemaVersion": 1,
   "status": "draft-not-published",
   "packageName": "com.voidmusic.player",
-  "version": "1.8.1-beta1",
-  "versionCode": 28,
+  "version": "1.8.1-beta5",
+  "versionCode": 29,
   "minimumSupportedVersion": null,
   "releaseNotes": [
     "Added a personal build flavor with a configurable app name and original equalizer launcher/notification branding.",
     "Added a tap-to-skip 3.2-second startup intro and persisted Now Playing speed presets.",
     "Made Stats for Nerds distinguish source-reported claims from current Media3 renderer information; unknown values remain explicit.",
-    "Hardened native JSON addon transport and update downloads with HTTPS/host checks, SHA-256 validation, signing-identity checks, byte progress and resumable partial downloads.",
+    "Added GitHub-based in-app updates with bounded checks, version comparison, verified Void Music APK selection, SHA-256/signing checks, download progress and installer-result verification.",
     "Added missing Simplified and Traditional Chinese strings."
   ],
   "downloadUrl": null,
-  "sha256": "e1ca3ce495cafd449c467d3eac418f5d4cac78a4f28784b14226ddf62b09a0dd",
+  "sha256": "784893f153ce35e8377093f0039aabae939dc33787840c7ce0cd78a3f0aea83c",
   "artifactFile": "Void Music.apk",
   "artifactPath": "Void Music.apk",
   "buildType": "debug",
   "publishedAt": null,
-  "migrationNotes": "The Android application ID changed to com.voidmusic.player. Android treats this as a separate app; data does not automatically migrate from com.music.bitchord. This APK uses the Android debug certificate; in-place update compatibility with other builds has not been verified."
+  "migrationNotes": "The Android application ID is com.voidmusic.player. This beta update preserves data only when installed over a matching package and signing certificate. This APK uses the Android debug certificate; update compatibility with builds signed by other keys is not supported."
 }

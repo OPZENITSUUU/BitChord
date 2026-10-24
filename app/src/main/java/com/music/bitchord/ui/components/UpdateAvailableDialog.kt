@@ -37,6 +37,7 @@ import com.halilibo.richtext.markdown.Markdown
 import com.halilibo.richtext.ui.RichTextStyle
 import com.halilibo.richtext.ui.material3.RichText
 import com.music.bitchord.R
+import com.music.bitchord.BuildConfig
 import com.music.bitchord.data.AppUpdateChecker
 import com.music.bitchord.data.settings.AppSettings
 import java.util.Locale
@@ -103,7 +104,6 @@ fun UpdateAvailableDialog(
     onDownload: () -> Unit,
     onCancelDownload: () -> Unit,
     onInstall: () -> Unit,
-    onOpenReleasePage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
@@ -160,6 +160,13 @@ fun UpdateAvailableDialog(
                         fontWeight = FontWeight.W600,
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = stringResource(R.string.update_versions, BuildConfig.VERSION_NAME, version),
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
                     textAlign = TextAlign.Center,
                 )
                 val baseMessage = when (state) {
@@ -285,13 +292,13 @@ fun UpdateAvailableDialog(
                 is AppUpdateChecker.DownloadState.Failed -> {
                     AlertAction(label = stringResource(R.string.try_again), emphasised = true, onClick = onDownload)
                     AlertRule()
-                    AlertAction(label = stringResource(R.string.open_releases_page), emphasised = false, onClick = onOpenReleasePage)
+                    AlertAction(label = stringResource(R.string.later), emphasised = false, onClick = onDismiss)
                 }
                 else -> {
                     AlertAction(
-                        label = stringResource(if (canDownload) R.string.download_now else R.string.open_releases_page),
+                        label = stringResource(if (canDownload) R.string.download_now else R.string.update_unavailable),
                         emphasised = true,
-                        onClick = if (canDownload) onDownload else onOpenReleasePage,
+                        onClick = if (canDownload) onDownload else onDismiss,
                     )
                     AlertRule()
                     AlertAction(label = stringResource(R.string.remind_me_later), emphasised = false, onClick = onDismiss)
