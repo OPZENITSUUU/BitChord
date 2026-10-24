@@ -19,6 +19,6 @@
   "artifactFile": "Void.Music.apk",
   "artifactPath": "Void.Music.apk",
   "buildType": "debug",
-  "publishedAt": null,
+  "publishedAt": "2026-10-24T11:27:22Z",
   "migrationNotes": "The Android application ID is com.voidmusic.player. This beta update preserves data only when installed over a matching package and signing certificate. This APK uses the Android debug certificate; update compatibility with builds signed by other keys is not supported."
 }
