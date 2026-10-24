@@ -598,30 +598,31 @@ class SourcesTest {
     }
 
     @Test
-    fun `JioSaavn is off by default on a fresh install`() {
-        assertFalse(SourceConfig(kind = SourceKind.JIOSAAVN).enabled)
-        val sources = SourceRegistry.sourcesForInit(emptyList(), forceJioSaavnOff = true)
-
-        assertFalse(sources.single { it.kind == SourceKind.JIOSAAVN }.enabled)
+    fun `JioSaavn is removed from fresh and existing source configurations`() {
+        val sources = SourceRegistry.sourcesForInit(emptyList())
         assertTrue(sources.single { it.kind == SourceKind.YOUTUBE }.enabled)
+
+        val previouslyConfigured = SourceConfig(kind = SourceKind.JIOSAAVN, enabled = true)
+        val migrated = SourceRegistry.sourcesForInit(listOf(previouslyConfigured))
+        assertTrue(migrated.none { it.kind == SourceKind.JIOSAAVN })
     }
 
     @Test
     fun `Commons FLAC is seeded opt-in and preserves an explicit user choice`() {
-        val initial = SourceRegistry.sourcesForInit(emptyList(), forceJioSaavnOff = true)
+        val initial = SourceRegistry.sourcesForInit(emptyList())
         assertFalse(SourceConfig(kind = SourceKind.WIKIMEDIA_COMMONS).enabled)
         assertFalse(initial.single { it.kind == SourceKind.WIKIMEDIA_COMMONS }.enabled)
 
         val optedIn = initial.map {
             if (it.kind == SourceKind.WIKIMEDIA_COMMONS) it.copy(enabled = true) else it
         }
-        val nextLaunch = SourceRegistry.sourcesForInit(optedIn, forceJioSaavnOff = false)
+        val nextLaunch = SourceRegistry.sourcesForInit(optedIn)
         assertTrue(nextLaunch.single { it.kind == SourceKind.WIKIMEDIA_COMMONS }.enabled)
     }
 
     @Test
     fun `requested public addon endpoints seed enabled once without bundling private token URLs`() {
-        val initial = SourceRegistry.sourcesForInit(emptyList(), forceJioSaavnOff = true)
+        val initial = SourceRegistry.sourcesForInit(emptyList())
         val addons = initial.filter { it.kind == SourceKind.ADDON }
 
         assertEquals(
@@ -643,7 +644,6 @@ class SourcesTest {
             .map { if (it.kind == SourceKind.ADDON) it.copy(enabled = false) else it }
         val nextLaunch = SourceRegistry.sourcesForInit(
             userChoice,
-            forceJioSaavnOff = false,
             seedDefaultAddons = false,
         )
         assertTrue(nextLaunch.none { it.baseUrl == "https://bluebit.jucepe0929.workers.dev" })
@@ -659,33 +659,13 @@ class SourcesTest {
             enabled = false,
         )
 
-        val initialized = SourceRegistry.sourcesForInit(listOf(existing), forceJioSaavnOff = false)
+        val initialized = SourceRegistry.sourcesForInit(listOf(existing))
 
         assertEquals(
             1,
             initialized.count { it.kind == SourceKind.ADDON && it.baseUrl.contains("eljohnzc-mono") },
         )
         assertFalse(initialized.single { it.id == "user-choice" }.enabled)
-    }
-
-    @Test
-    fun `the opt-in migration disables JioSaavn once for existing installs`() {
-        val previouslyEnabled = SourceConfig(kind = SourceKind.JIOSAAVN, enabled = true)
-
-        val migrated = SourceRegistry.sourcesForInit(
-            listOf(previouslyEnabled),
-            forceJioSaavnOff = true,
-        )
-        assertFalse(migrated.single { it.kind == SourceKind.JIOSAAVN }.enabled)
-
-        val userEnabledAgain = migrated.map {
-            if (it.kind == SourceKind.JIOSAAVN) it.copy(enabled = true) else it
-        }
-        val nextLaunch = SourceRegistry.sourcesForInit(
-            userEnabledAgain,
-            forceJioSaavnOff = false,
-        )
-        assertTrue(nextLaunch.single { it.kind == SourceKind.JIOSAAVN }.enabled)
     }
 
     @Test

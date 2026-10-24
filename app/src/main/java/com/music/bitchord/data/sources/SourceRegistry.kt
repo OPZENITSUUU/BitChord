@@ -108,11 +108,9 @@ object SourceRegistry {
         prefs = EncryptedPrefs.open(context, "bitchord_sources", "bitchord_sources_plain")
 
         val stored = prefs.getString(KEY_SOURCES, null)?.let(::decodeStored) ?: emptyList()
-        val jioOptInMigrationDone = prefs.getBoolean(KEY_JIOSAAVN_OPT_IN_V1, false)
         val defaultAddonsSeeded = prefs.getBoolean(KEY_DEFAULT_ADDONS_SEEDED_V1, false)
         val after = sourcesForInit(
             stored,
-            forceJioSaavnOff = !jioOptInMigrationDone,
             seedDefaultAddons = !defaultAddonsSeeded,
         )
 
@@ -121,31 +119,24 @@ object SourceRegistry {
         // disabled source, the next launch would otherwise believe the forced
         // opt-out had already happened and silently restore the old on state.
         publish(after, persist = false)
-        if (after != stored || !jioOptInMigrationDone || !defaultAddonsSeeded) {
+        if (after != stored || !defaultAddonsSeeded) {
             prefs.edit()
                 .putString(KEY_SOURCES, json.encodeToString(ListSerializer(SourceConfig.serializer()), after))
-                .putBoolean(KEY_JIOSAAVN_OPT_IN_V1, true)
                 .putBoolean(KEY_DEFAULT_ADDONS_SEEDED_V1, true)
                 .apply()
         }
     }
 
     /**
-     * Built-in seeding and one-time source migrations, kept pure for tests.
-     *
-     * [forceJioSaavnOff] is true exactly once for every install that first runs
-     * this version, including upgrades whose stored config currently says on.
-     * Once the marker is written, a user who deliberately enables JioSaavn is
-     * left enabled on subsequent launches.
+     * Built-in seeding and source migrations, kept pure for tests.
      */
     internal fun sourcesForInit(
         stored: List<SourceConfig>,
-        forceJioSaavnOff: Boolean,
         seedDefaultAddons: Boolean = true,
     ): List<SourceConfig> {
         // Seeded rather than persisted-on-first-write, so a build adding a new
-        // built-in kind picks it up for existing installs too. Commons and
-        // JioSaavn remain opt-in; YouTube is on. User-requested add-ons are
+        // built-in kind picks it up for existing installs too. Commons remains
+        // opt-in; YouTube is on. JioSaavn is retired. User-requested add-ons are
         // seeded once and then their stored on/off/removal choice is respected.
         val withBuiltIns = stored + BUILT_IN_KINDS
             .filter { kind -> stored.none { it.kind == kind } }
@@ -163,11 +154,10 @@ object SourceRegistry {
         // The retired built-in module is removed, while a custom module entered
         // by the user is preserved.
         return seeded
-            .filterNot { it.kind == SourceKind.MODULE }
+            .filterNot { it.kind == SourceKind.MODULE || it.kind == SourceKind.JIOSAAVN }
             .map { config ->
                 when {
                     config.kind == SourceKind.YOUTUBE && !config.enabled -> config.copy(enabled = true)
-                    config.kind == SourceKind.JIOSAAVN && forceJioSaavnOff -> config.copy(enabled = false)
                     else -> config
                 }
             }
@@ -518,7 +508,7 @@ object SourceRegistry {
             .build()
             .toString()
 
-    private val BUILT_IN_KINDS = listOf(SourceKind.WIKIMEDIA_COMMONS, SourceKind.JIOSAAVN, SourceKind.YOUTUBE)
+    private val BUILT_IN_KINDS = listOf(SourceKind.WIKIMEDIA_COMMONS, SourceKind.YOUTUBE)
 
     /** Public endpoints requested by the user. Credential-bearing paths are never bundled in an APK. */
     private val DEFAULT_ADDONS = listOf(
@@ -557,8 +547,6 @@ object SourceRegistry {
     )
 
     private const val KEY_SOURCES = "sources"
-    /** One-shot migration: existing users must explicitly opt in again. */
-    private const val KEY_JIOSAAVN_OPT_IN_V1 = "jiosaavn_opt_in_v1"
     private const val KEY_DEFAULT_ADDONS_SEEDED_V1 = "default_addons_seeded_v1"
     private const val PREFIX = "src:"
     private const val SEPARATOR = "::"
