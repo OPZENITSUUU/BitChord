@@ -113,7 +113,7 @@ object AppUpdateChecker {
             check(isPersonalReleaseUrl(url)) { "GitHub release URL is not from the configured repository" }
             prefs.edit().putLong(KEY_LAST_CHECK_MS, now).apply()
             val apk = verifiedApkAsset(release)
-            val notes = release["body"]?.jsonPrimitive?.contentOrNull
+            val notes = conciseReleaseNotes(release["body"]?.jsonPrimitive?.contentOrNull)
             val latest = tag.removePrefix("v")
             if (!isNewer(latest, BuildConfig.VERSION_NAME)) {
                 CheckResult.UP_TO_DATE
@@ -143,7 +143,7 @@ object AppUpdateChecker {
         val releaseUrl = prefs.getString(KEY_PENDING_RELEASE_URL, null) ?: run { _available.value = null; return null }
         val apkUrl = prefs.getString(KEY_PENDING_APK_URL, null) ?: run { _available.value = null; return null }
         val digest = prefs.getString(KEY_PENDING_APK_SHA256, null) ?: run { _available.value = null; return null }
-        val update = UpdateInfo(version, releaseUrl, apkUrl, digest, prefs.getString(KEY_PENDING_NOTES, null))
+        val update = UpdateInfo(version, releaseUrl, apkUrl, digest, conciseReleaseNotes(prefs.getString(KEY_PENDING_NOTES, null)))
         _available.value = update
         return update
     }
@@ -539,5 +539,27 @@ object AppUpdateChecker {
             }
         }
         return l.preRelease.size > c.preRelease.size
+    }
+
+    /** Keep the launch prompt scannable by showing at most four brief changelog bullets. */
+    private fun conciseReleaseNotes(notes: String?): String? {
+        if (notes.isNullOrBlank()) return null
+        val lines = notes.lineSequence()
+            .map(String::trim)
+            .filter { it.isNotEmpty() && !it.startsWith("#") }
+            .toList()
+        val explicitBullets = lines.filter { it.matches(Regex("^(?:[-*•]|\\d+[.)])\\s+.*")) }
+        val source = explicitBullets.ifEmpty {
+            lines.flatMap { it.split(Regex("(?<=[.!?])\\s+")) }
+        }
+        val points = source.asSequence()
+            .map { it.replace(Regex("^(?:[-*•]|\\d+[.)])\\s+"), "").trim() }
+            .filter(String::isNotBlank)
+            .take(4)
+            .map { point ->
+                if (point.length <= 120) point else point.take(117).substringBeforeLast(' ') + "…"
+            }
+            .toList()
+        return points.takeIf { it.isNotEmpty() }?.joinToString("\n") { "- $it" }
     }
 }

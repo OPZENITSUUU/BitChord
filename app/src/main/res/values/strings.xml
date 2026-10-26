@@ -142,9 +142,11 @@
     <string name="dolby_atmos_open_failed">Couldn’t open Dolby Atmos settings</string>
     <string name="update_available">Update available: v%1$s</string>
     <string name="software_update">Software Update</string>
+    <string name="check_for_updates">Check for Updates</string>
+    <string name="update_later">Update Later</string>
     <string name="update_versions" translatable="false">Current: %1$s · Available: %2$s</string>
-    <string name="settings_update_check_subtitle" translatable="false">Current %1$s · Tap to check; background alerts need notifications</string>
-    <string name="settings_update_available" translatable="false">Current %1$s · Update %2$s available — tap to update</string>
+    <string name="settings_update_check_subtitle" translatable="false">Current %1$s · Background alerts need notifications</string>
+    <string name="settings_update_available" translatable="false">Current %1$s · Update %2$s available</string>
     <string name="settings_update_current" translatable="false">Void Music is up to date (%1$s).</string>
     <string name="settings_update_no_apk" translatable="false">A newer release exists, but has no compatible verified APK.</string>
     <string name="settings_update_check_failed" translatable="false">Could not check GitHub right now. Try again later.</string>

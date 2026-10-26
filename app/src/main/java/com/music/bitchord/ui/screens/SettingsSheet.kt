@@ -1315,7 +1315,13 @@ fun SettingsScreen(
                     subtitle = availableUpdateVersion?.let {
                         stringResource(R.string.settings_update_available, version, it)
                     } ?: stringResource(R.string.settings_update_check_subtitle, version),
-                    onClick = if (availableUpdateVersion == null) onCheckForUpdates else onOpenUpdate,
+                    trailing = {
+                        TextButton(
+                            onClick = if (availableUpdateVersion == null) onCheckForUpdates else onOpenUpdate,
+                        ) {
+                            Text(stringResource(if (availableUpdateVersion == null) R.string.check_for_updates else R.string.download_now))
+                        }
+                    },
                 )
             }
         }

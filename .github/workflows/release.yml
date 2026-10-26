@@ -227,11 +227,70 @@ jobs:
           name: macos-${{ matrix.arch }}-artifacts
           path: dist/*
 
+  android:
+    name: Android · signed production APK
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure production signing
+        shell: bash
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required repository secret: $name"
+              exit 1
+            fi
+          done
+          printf 'LASTFM_API_KEY=%s\nLASTFM_SECRET=%s\n' "$LASTFM_API_KEY" "$LASTFM_SECRET" > local.properties
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > bitchord-release.jks
+          {
+            printf 'storeFile=bitchord-release.jks\n'
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } > keystore.properties
+
+      - name: Build signed production APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleProdRelease
+
+      - name: Prepare updater-compatible APK asset
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/prod/release/app-prod-universal-release.apk dist/Void.Music.apk
+          ls -lh dist/Void.Music.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-artifacts
+          path: dist/Void.Music.apk
+
   release:
     name: Publish
-    needs: [linux, windows, macos]
+    needs: [linux, windows, macos, android]
     runs-on: ubuntu-latest
     steps:
+      - name: Determine release version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           pattern: "*-artifacts"
@@ -240,13 +299,13 @@ jobs:
 
       - run: ls -lh dist
 
-      - name: Draft the release
+      - name: Publish the Void Music release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: BitChord ${{ github.ref_name }}
-          draft: true
+          name: Void Music ${{ steps.version.outputs.value }}
+          draft: false
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
